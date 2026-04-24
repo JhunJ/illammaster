@@ -1,0 +1,496 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Illammaster — 관리</title>
+  <style>
+    * { box-sizing: border-box; }
+    body { margin: 0; font-family: "Segoe UI", "Malgun Gothic", sans-serif; background: #f6f8fa; color: #24292f; font-size: 0.85rem; }
+    a { color: #0969da; }
+    header {
+      display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 10px;
+      padding: 12px 20px; background: #fff; border-bottom: 1px solid #d0d7de;
+    }
+    header h1 { margin: 0; font-size: 1rem; font-weight: 600; }
+    main { max-width: 1100px; margin: 0 auto; padding: 16px 20px 40px; }
+    section {
+      background: #fff; border: 1px solid #d0d7de; border-radius: 8px; padding: 14px 16px; margin-bottom: 16px;
+    }
+    section h2 { margin: 0 0 12px; font-size: 0.88rem; color: #57606a; font-weight: 600; }
+    label { display: block; font-size: 0.76rem; font-weight: 600; color: #57606a; margin-bottom: 4px; }
+    input, select, button {
+      font: inherit; padding: 6px 10px; border: 1px solid #d0d7de; border-radius: 6px; background: #fff; font-size: 0.82rem;
+    }
+    input, select { width: 100%; max-width: 320px; }
+    .row { display: flex; flex-wrap: wrap; gap: 10px 14px; align-items: flex-end; margin-bottom: 10px; }
+    .row .field { margin-bottom: 0; }
+    .field { margin-bottom: 8px; }
+    button {
+      cursor: pointer; background: #0969da; color: #fff; border: none; font-weight: 600; width: auto; padding: 6px 14px;
+    }
+    button.secondary { background: #fff; color: #0969da; border: 1px solid #d0d7de; }
+    button.danger { background: #cf222e; }
+    .btn-row { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+    table { width: 100%; border-collapse: collapse; font-size: 0.78rem; margin-top: 10px; }
+    th, td { border: 1px solid #eaeef2; padding: 6px 8px; text-align: left; }
+    th { background: #f6f8fa; color: #57606a; font-weight: 600; }
+    .msg { font-size: 0.78rem; margin-top: 8px; word-break: break-word; }
+    .msg.ok { color: #1a7f37; }
+    .msg.err { color: #cf222e; }
+    .rail {
+      position: fixed; left: 0; top: 0; bottom: 0; width: 44px; background: linear-gradient(180deg, #2d333b 0%, #22272e 100%);
+      border-right: 1px solid #444c56; display: flex; flex-direction: column; align-items: center; padding: 10px 0; gap: 6px; z-index: 5;
+    }
+    .rail a, .rail button {
+      width: 34px; height: 34px; padding: 0; border-radius: 6px; border: 1px solid transparent; background: transparent;
+      color: #adbac7; font-size: 0.72rem; font-weight: 700; cursor: pointer; text-decoration: none;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .rail a:hover, .rail button:hover { background: rgba(255,255,255,0.08); color: #fff; }
+    body { padding-left: 44px; }
+  </style>
+</head>
+<body>
+  <nav class="rail" aria-label="작업 전환">
+    <a href="/" id="railHomeMain" title="일람 추출">데</a>
+  </nav>
+  <header>
+    <h1>Illammaster 관리</h1>
+    <span style="font-size:0.78rem;color:#57606a">등록자 · 프로젝트 · 편집 세션</span>
+  </header>
+  <main>
+    <section id="secUsers">
+      <h2>등록자</h2>
+      <div class="row">
+        <div class="field">
+          <label for="muName">이름</label>
+          <input id="muName" placeholder="이름" />
+        </div>
+        <div class="field">
+          <label for="muEmail">이메일</label>
+          <input id="muEmail" type="email" placeholder="email@company.com" />
+        </div>
+        <div class="field">
+          <label for="muRole">역할 / 부서</label>
+          <input id="muRole" placeholder="예: 대우건설 BIM" />
+        </div>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="muBtnAdd">추가</button>
+        <button type="button" class="secondary" id="muBtnRefresh">새로고침</button>
+      </div>
+      <p id="muMsg" class="msg"></p>
+      <table>
+        <thead><tr><th>ID</th><th>이름</th><th>이메일</th><th>역할</th><th></th></tr></thead>
+        <tbody id="muTbody"></tbody>
+      </table>
+    </section>
+
+    <section id="secProjects">
+      <h2>프로젝트</h2>
+      <div class="row">
+        <div class="field">
+          <label for="mpCreator">등록자 (선택)</label>
+          <select id="mpCreator"><option value="">—</option></select>
+        </div>
+        <div class="field">
+          <label for="mpName">이름</label>
+          <input id="mpName" placeholder="프로젝트 이름" />
+        </div>
+        <div class="field">
+          <label for="mpCode">코드 (비우면 자동)</label>
+          <input id="mpCode" placeholder="고유 코드" />
+        </div>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="mpBtnAdd">추가</button>
+        <button type="button" class="secondary" id="mpBtnRefresh">새로고침</button>
+      </div>
+      <p id="mpMsg" class="msg"></p>
+      <table>
+        <thead><tr><th>ID</th><th>이름</th><th>코드</th><th>등록자</th><th></th></tr></thead>
+        <tbody id="mpTbody"></tbody>
+      </table>
+    </section>
+
+    <section id="secSessions">
+      <h2>버전 내용 수정 / 삭제 세션</h2>
+      <div class="row">
+        <div class="field">
+          <label for="msProject">프로젝트</label>
+          <select id="msProject"><option value="">선택</option></select>
+        </div>
+        <div class="field">
+          <label for="msCommit">버전 (커밋)</label>
+          <select id="msCommit"><option value="">선택</option></select>
+        </div>
+        <div class="field">
+          <label for="msEditor">편집자</label>
+          <select id="msEditor"><option value="">선택</option></select>
+        </div>
+      </div>
+      <div class="btn-row">
+        <button type="button" id="msBtnStart">세션 시작</button>
+        <button type="button" class="secondary" id="msBtnEnd">세션 종료 (목록에서 선택)</button>
+        <button type="button" class="secondary" id="msBtnRefresh">새로고침</button>
+      </div>
+      <p id="msMsg" class="msg"></p>
+      <table>
+        <thead><tr><th>ID</th><th>프로젝트</th><th>커밋</th><th>편집자</th><th>시작</th><th>종료</th><th></th></tr></thead>
+        <tbody id="msTbody"></tbody>
+      </table>
+    </section>
+  </main>
+  <script>
+    const DEFAULT_API_ORIGIN = 'http://127.0.0.1:8011';
+    function normalizeApiOrigin(b) {
+      let s = String(b).trim().replace(/\/+$/, '').replace(/\/api$/i, '');
+      return s.replace(/\/+$/, '');
+    }
+    function apiBase() {
+      const q = new URLSearchParams(window.location.search);
+      const fromQ = q.get('api');
+      if (fromQ !== null && fromQ !== '') return normalizeApiOrigin(fromQ);
+      if (window.location.protocol === 'file:') return normalizeApiOrigin(DEFAULT_API_ORIGIN);
+      const port = String(window.location.port || '');
+      const host = window.location.hostname;
+      const local = host === '127.0.0.1' || host === 'localhost';
+      const devPorts = { '5500': 1, '5173': 1, '3000': 1, '8080': 1, '4173': 1, '5174': 1 };
+      if (local && devPorts[port]) return normalizeApiOrigin(DEFAULT_API_ORIGIN);
+      if (local && port && port !== '8011' && port !== '8010' && port !== '8000') return normalizeApiOrigin(DEFAULT_API_ORIGIN);
+      return '';
+    }
+    function apiUrl(path) {
+      const p = path.startsWith('/') ? path : '/' + path;
+      const b = apiBase();
+      return b ? normalizeApiOrigin(b) + p : p;
+    }
+    function api(path, opts) {
+      return fetch(apiUrl(path), opts).then(async (r) => {
+        const t = await r.text();
+        let data;
+        try { data = JSON.parse(t); } catch { data = t; }
+        if (!r.ok) {
+          let msg = t;
+          if (typeof data === 'object' && data !== null && data.detail != null) {
+            msg = Array.isArray(data.detail)
+              ? data.detail.map((d) => d.msg || JSON.stringify(d)).join(', ')
+              : String(data.detail);
+          }
+          const err = new Error(msg);
+          err.status = r.status;
+          throw err;
+        }
+        return data;
+      });
+    }
+
+    let usersCache = [];
+    let projectsCache = [];
+    let selectedSessionId = null;
+
+    function userNameById(id) {
+      if (id == null) return '—';
+      const u = usersCache.find((x) => x.id === id);
+      return u ? u.name : '#' + id;
+    }
+
+    async function refreshUsers() {
+      usersCache = await api('/api/users');
+      const tb = document.getElementById('muTbody');
+      tb.innerHTML = '';
+      usersCache.forEach((u) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + u.id + '</td><td>' + escapeHtml(u.name) + '</td><td>' + escapeHtml(u.email) + '</td><td>' + escapeHtml(u.role || '—') + '</td>' +
+          '<td><button type="button" class="danger mu-del" data-id="' + u.id + '">삭제</button></td>';
+        tb.appendChild(tr);
+      });
+      tb.querySelectorAll('.mu-del').forEach((btn) => {
+        btn.onclick = async () => {
+          const id = Number(btn.getAttribute('data-id'));
+          if (!confirm('사용자 #' + id + ' 삭제할까요?')) return;
+          try {
+            await api('/api/users/' + id, { method: 'DELETE' });
+            document.getElementById('muMsg').className = 'msg ok';
+            document.getElementById('muMsg').textContent = '삭제됨';
+            await refreshUsers();
+            fillUserSelects();
+          } catch (e) {
+            document.getElementById('muMsg').className = 'msg err';
+            document.getElementById('muMsg').textContent = String(e.message || e);
+          }
+        };
+      });
+    }
+
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function fillUserSelects() {
+      const mp = document.getElementById('mpCreator');
+      const cur = mp.value;
+      mp.innerHTML = '<option value="">—</option>';
+      usersCache.forEach((u) => {
+        const o = document.createElement('option');
+        o.value = String(u.id);
+        o.textContent = u.name + ' · ' + u.email;
+        mp.appendChild(o);
+      });
+      if (cur && [...mp.options].some((o) => o.value === cur)) mp.value = cur;
+
+      const ed = document.getElementById('msEditor');
+      const curE = ed.value;
+      ed.innerHTML = '<option value="">선택</option>';
+      usersCache.forEach((u) => {
+        const o = document.createElement('option');
+        o.value = String(u.id);
+        o.textContent = u.name;
+        ed.appendChild(o);
+      });
+      if (curE && [...ed.options].some((o) => o.value === curE)) ed.value = curE;
+    }
+
+    async function refreshProjects() {
+      projectsCache = await api('/api/projects');
+      const mpTb = document.getElementById('mpTbody');
+      mpTb.innerHTML = '';
+      projectsCache.forEach((p) => {
+        const tr = document.createElement('tr');
+        tr.innerHTML =
+          '<td>' + p.id + '</td><td>' + escapeHtml(p.name) + '</td><td>' + escapeHtml(p.code) + '</td><td>' +
+          escapeHtml(userNameById(p.created_by)) + '</td>' +
+          '<td><button type="button" class="danger mp-del" data-id="' + p.id + '">삭제</button></td>';
+        mpTb.appendChild(tr);
+      });
+      mpTb.querySelectorAll('.mp-del').forEach((btn) => {
+        btn.onclick = async () => {
+          const id = Number(btn.getAttribute('data-id'));
+          if (!confirm('프로젝트 #' + id + ' 및 모든 버전·도면 데이터를 삭제할까요?')) return;
+          try {
+            await api('/api/projects/' + id, { method: 'DELETE' });
+            document.getElementById('mpMsg').className = 'msg ok';
+            document.getElementById('mpMsg').textContent = '삭제됨';
+            await refreshProjects();
+            fillMsProjectSelect();
+          } catch (e) {
+            document.getElementById('mpMsg').className = 'msg err';
+            document.getElementById('mpMsg').textContent = String(e.message || e);
+          }
+        };
+      });
+
+      const msP = document.getElementById('msProject');
+      const curP = msP.value;
+      msP.innerHTML = '<option value="">선택</option>';
+      projectsCache.forEach((p) => {
+        const o = document.createElement('option');
+        o.value = String(p.id);
+        o.textContent = p.code + ' · ' + p.name;
+        msP.appendChild(o);
+      });
+      if (curP && [...msP.options].some((o) => o.value === curP)) msP.value = curP;
+    }
+
+    async function loadMsCommits(pid) {
+      const sel = document.getElementById('msCommit');
+      sel.innerHTML = '<option value="">선택</option>';
+      if (!pid) return;
+      const rows = await api('/api/projects/' + pid + '/commits');
+      rows.sort((a, b) => {
+        const ta = a.created_at ? new Date(a.created_at).getTime() : 0;
+        const tb = b.created_at ? new Date(b.created_at).getTime() : 0;
+        if (ta !== tb) return ta - tb;
+        return (a.id || 0) - (b.id || 0);
+      });
+      rows.forEach((c) => {
+        const o = document.createElement('option');
+        o.value = String(c.id);
+        const vl = c.version_label ? String(c.version_label) : '';
+        o.textContent = '#' + c.id + (vl ? ' · ' + vl : '');
+        sel.appendChild(o);
+      });
+    }
+
+    async function refreshSessions() {
+      const rows = await api('/api/edit-sessions');
+      const tb = document.getElementById('msTbody');
+      tb.innerHTML = '';
+      if (!rows.length) {
+        const tr = document.createElement('tr');
+        tr.innerHTML = '<td colspan="7" style="color:#57606a">세션 없음</td>';
+        tb.appendChild(tr);
+        return;
+      }
+      rows.forEach((s) => {
+        const tr = document.createElement('tr');
+        const proj = projectsCache.find((p) => p.id === s.project_id);
+        const pname = proj ? proj.name : '#' + s.project_id;
+        const ended = s.ended_at ? String(s.ended_at).replace('T', ' ').slice(0, 19) : '—';
+        const started = s.started_at ? String(s.started_at).replace('T', ' ').slice(0, 19) : '—';
+        tr.innerHTML =
+          '<td>' + s.id + '</td><td>' + escapeHtml(pname) + '</td><td>#' + s.commit_id + '</td><td>' +
+          escapeHtml(userNameById(s.editor_user_id)) + '</td><td>' + started + '</td><td>' + ended + '</td><td></td>';
+        const td = tr.querySelector('td:last-child');
+        if (!s.ended_at) {
+          const b = document.createElement('button');
+          b.type = 'button';
+          b.className = 'secondary';
+          b.textContent = '종료';
+          b.onclick = async () => {
+            try {
+              await api('/api/edit-sessions/' + s.id + '/end', { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: '{}' });
+              document.getElementById('msMsg').className = 'msg ok';
+              document.getElementById('msMsg').textContent = '세션 종료됨';
+              await refreshSessions();
+            } catch (e) {
+              document.getElementById('msMsg').className = 'msg err';
+              document.getElementById('msMsg').textContent = String(e.message || e);
+            }
+          };
+          td.appendChild(b);
+        }
+        const b2 = document.createElement('button');
+        b2.type = 'button';
+        b2.className = 'danger';
+        b2.style.marginLeft = '6px';
+        b2.textContent = '삭제';
+        b2.onclick = async () => {
+          if (!confirm('세션 #' + s.id + ' 기록을 삭제할까요?')) return;
+          try {
+            await api('/api/edit-sessions/' + s.id, { method: 'DELETE' });
+            document.getElementById('msMsg').className = 'msg ok';
+            document.getElementById('msMsg').textContent = '삭제됨';
+            await refreshSessions();
+          } catch (e) {
+            document.getElementById('msMsg').className = 'msg err';
+            document.getElementById('msMsg').textContent = String(e.message || e);
+          }
+        };
+        td.appendChild(b2);
+        tb.appendChild(tr);
+      });
+    }
+
+    function fillMsProjectSelect() {
+      refreshProjects().then(() => loadMsCommits(document.getElementById('msProject').value));
+    }
+
+    document.getElementById('muBtnAdd').onclick = async () => {
+      const msg = document.getElementById('muMsg');
+      msg.textContent = '';
+      try {
+        await api('/api/users', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            name: document.getElementById('muName').value,
+            email: document.getElementById('muEmail').value,
+            role: document.getElementById('muRole').value || null,
+          }),
+        });
+        msg.className = 'msg ok';
+        msg.textContent = '등록됨';
+        await refreshUsers();
+        fillUserSelects();
+      } catch (e) {
+        msg.className = 'msg err';
+        msg.textContent = String(e.message || e);
+      }
+    };
+    document.getElementById('muBtnRefresh').onclick = () => refreshUsers().then(fillUserSelects);
+
+    document.getElementById('mpBtnAdd').onclick = async () => {
+      const msg = document.getElementById('mpMsg');
+      msg.textContent = '';
+      const body = {
+        name: document.getElementById('mpName').value.trim(),
+        created_by: document.getElementById('mpCreator').value ? Number(document.getElementById('mpCreator').value) : null,
+      };
+      const code = document.getElementById('mpCode').value.trim();
+      if (code) body.code = code;
+      try {
+        await api('/api/projects', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(body),
+        });
+        msg.className = 'msg ok';
+        msg.textContent = '추가됨';
+        document.getElementById('mpName').value = '';
+        document.getElementById('mpCode').value = '';
+        await refreshProjects();
+        fillMsProjectSelect();
+      } catch (e) {
+        msg.className = 'msg err';
+        msg.textContent = String(e.message || e);
+      }
+    };
+    document.getElementById('mpBtnRefresh').onclick = () => refreshProjects().then(fillMsProjectSelect);
+
+    document.getElementById('msProject').onchange = () => loadMsCommits(document.getElementById('msProject').value);
+
+    document.getElementById('msBtnStart').onclick = async () => {
+      const msg = document.getElementById('msMsg');
+      msg.textContent = '';
+      const pid = document.getElementById('msProject').value;
+      const cid = document.getElementById('msCommit').value;
+      const eid = document.getElementById('msEditor').value;
+      if (!pid || !cid) {
+        msg.className = 'msg err';
+        msg.textContent = '프로젝트와 커밋을 선택하세요.';
+        return;
+      }
+      try {
+        await api('/api/edit-sessions', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            project_id: Number(pid),
+            commit_id: Number(cid),
+            editor_user_id: eid ? Number(eid) : null,
+          }),
+        });
+        msg.className = 'msg ok';
+        msg.textContent = '세션 시작됨';
+        await refreshSessions();
+      } catch (e) {
+        msg.className = 'msg err';
+        msg.textContent = String(e.message || e);
+      }
+    };
+
+    document.getElementById('msBtnEnd').onclick = async () => {
+      document.getElementById('msMsg').textContent = '목록의 활성 세션 행에서 「종료」를 누르세요.';
+      document.getElementById('msMsg').className = 'msg';
+    };
+
+    document.getElementById('msBtnRefresh').onclick = () => refreshSessions();
+
+    (function syncRailHome() {
+      const b = apiBase();
+      const h = document.getElementById('railHomeMain');
+      if (h) h.href = '/' + (b ? ('?api=' + encodeURIComponent(b)) : '');
+    })();
+
+    (async function init() {
+      try {
+        await refreshUsers();
+        fillUserSelects();
+        await refreshProjects();
+        document.getElementById('msCommit').innerHTML = '<option value="">선택</option>';
+        await refreshSessions();
+      } catch (e) {
+        document.getElementById('muMsg').className = 'msg err';
+        document.getElementById('muMsg').textContent = String(e.message || e);
+      }
+    })();
+  </script>
+</body>
+</html>

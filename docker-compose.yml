@@ -1,0 +1,21 @@
+services:
+  postgis:
+    image: postgis/postgis:16-3.4
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: caduser
+      POSTGRES_PASSWORD: cadpass
+      POSTGRES_DB: illammaster
+    ports:
+      # 호스트 5433에 다른 PostgreSQL이 있으면 비밀번호 충돌이 납니다. 기본 5434 권장.
+      - "${ILLAMMASTER_PG_PORT:-5434}:5432"
+    volumes:
+      - illammaster_pg:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U caduser -d illammaster"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  illammaster_pg:

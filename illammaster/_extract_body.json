@@ -1,0 +1,1 @@
+{"category":"column","config":{"rules_version":"1.0","y_tolerance":2.5,"min_row_texts":1,"layer_include":[],"layer_exclude":[],"wall_mode":"cad","slab_layout":"auto","column_layout":"vertical_blocks","column_band_y_tol":4},"include_geometry_hints":false}
