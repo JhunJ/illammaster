@@ -7,7 +7,7 @@ from __future__ import annotations
 import math
 import re
 from dataclasses import dataclass, field
-from typing import Any
+from typing import Any, Callable
 
 from geoalchemy2.functions import ST_Intersects, ST_MakeEnvelope
 from geoalchemy2.shape import to_shape
@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 from app.models import Entity
 
 from app.services.column_section_geometry import (
+    enrich_rows_beam_flat_section_geometry,
     enrich_rows_beam_vertical_section_geometry_zones,
     enrich_rows_column_section_geometry,
     header_row_is_section_geometry_anchor,
@@ -56,10 +57,24 @@ class ExtractionConfig:
     column_strip_gap: float | None = None
     """같은 블록 안에서 한 줄로 볼 Y 허용(세로 블록 모드)."""
     column_band_y_tol: float = 4.0
-    # beam_layout: auto | horizontal_wide | vertical_blocks | flat
+    # beam_layout: auto | horizontal_wide | vertical_blocks | flat — 보는 Y행 묶음에서 가로 표 인식을 먼저 시도.
     beam_layout: str = "auto"
     # beam_band_y_tol None이면 column_band_y_tol과 동일하게 사용
     beam_band_y_tol: float | None = None
+    # 보 추출 시 기본 True — 빈 문자열 TEXT/ATTRIB 도 같은 Y행 묶음에 포함(extract_schedule에서 설정).
+    include_empty_text_entities: bool = False
+    # 보: 인접 얇은 행 병합 시 Y중심 최대 차(None이면 max(3.5*y_tolerance, 10)).
+    beam_row_merge_y_max: float | None = None
+    # 보: 병합 시 한 덩어리로 흡수할 인접 행의 최대 텍스트 수(None이면 4).
+    beam_row_merge_max_glue: int | None = None
+    # 보: 한 수평 묶음으로 합친 뒤 최대 텍스트 수(None이면 512 — 가로 긴 일람 대응).
+    beam_row_merge_max_merged: int | None = None
+    # 보: 가교 병합 시 끝 행 최대 텍스트 수(None이면 8 — 부호+소라벨 등).
+    beam_row_bridge_max_endpoint: int | None = None
+    # 보: 가교 병합 시 사이 행 텍스트 수 상한(None이면 1 — END 등 한 줄이 끼면 막음).
+    beam_row_bridge_max_mid: int | None = None
+    # 보: 가교 병합 반복 횟수(None이면 1 — 부호↔부호 한 번만 잇고 끝).
+    beam_row_bridge_passes: int | None = None
 
 
 def _entity_xy(ent: Entity) -> tuple[float, float] | None:
@@ -182,7 +197,9 @@ def load_text_entities(
             continue
         text = _text_from_props(ent.props if isinstance(ent.props, dict) else None)
         if not text:
-            continue
+            if not cfg.include_empty_text_entities:
+                continue
+            text = ""
         item = {
             "id": ent.id,
             "layer": ent.layer,
@@ -220,6 +237,261 @@ def cluster_rows(items: list[dict[str, Any]], y_tol: float) -> list[list[dict[st
     if current:
         current.sort(key=lambda r: r["x"])
         rows.append(current)
+    return rows
+
+
+def beam_row_clusters_for_validation(
+    rows_cluster: list[list[dict[str, Any]]],
+) -> list[dict[str, Any]]:
+    """
+    보 Y-행 묶음( cluster_rows 결과 )을 뷰어 표시·디버그용으로 직렬화.
+    글자가 없는 엔티티만 있는 행(empty_only)도 bbox·entity_ids 로 포함한다.
+    """
+    out: list[dict[str, Any]] = []
+    for i, row in enumerate(rows_cluster):
+        if not row:
+            continue
+        xs = [float(r["x"]) for r in row]
+        ys = [float(r["y"]) for r in row]
+        texts = [str(r.get("text") or "") for r in row]
+        ne = sum(1 for t in texts if str(t).strip())
+        out.append(
+            {
+                "row_index": i,
+                "entity_ids": [r.get("id") for r in row],
+                "texts": texts,
+                "y_mean": round(sum(ys) / len(ys), 4),
+                "bbox": [
+                    round(min(xs), 4),
+                    round(min(ys), 4),
+                    round(max(xs), 4),
+                    round(max(ys), 4),
+                ],
+                "non_empty_text_count": ne,
+                "empty_only": ne == 0,
+            }
+        )
+    return out
+
+
+def _row_mean_y(row: list[dict[str, Any]]) -> float:
+    ys = [float(r["y"]) for r in row]
+    return sum(ys) / len(ys) if ys else 0.0
+
+
+_RE_BEAM_MARK_LIKE = re.compile(r"^\s*[A-Z]{1,3}\s*\d{1,4}[A-Z]?\s*(?:\(.+\))?\s*$", re.I)
+# 공백 제거 후 비교하는 헤더 토큰(한글 띄어쓰기/전각 공백 흔들림 대응)
+_BEAM_HEADER_TOKENS = {
+    "부호",
+    "기호",
+    "형태",
+    "상부근",
+    "하부근",
+    "스트럽",
+    "스터럽",
+    "표피철근",
+}
+
+
+def _row_nonempty_texts(row: list[dict[str, Any]]) -> list[str]:
+    out: list[str] = []
+    for it in row:
+        t = str(it.get("text") or "")
+        # 전각/호환 문자를 통일해 헤더 토큰 판정이 흔들리지 않게
+        try:
+            import unicodedata
+
+            t = unicodedata.normalize("NFKC", t)
+        except Exception:
+            pass
+        t = t.strip()
+        if t:
+            out.append(re.sub(r"\s+", " ", t))
+    return out
+
+
+def _row_has_beam_mark_like(row: list[dict[str, Any]]) -> bool:
+    texts = _row_nonempty_texts(row)
+    if not texts:
+        return False
+    # 너무 공격적이면 오탐이 커지므로, mark-like는 영문+숫자 중심 패턴만 허용
+    for t in texts:
+        if _RE_BEAM_MARK_LIKE.match(t) and re.search(r"\d", t):
+            return True
+    return False
+
+
+def _row_is_beam_header_like(row: list[dict[str, Any]]) -> bool:
+    texts = _row_nonempty_texts(row)
+    if not texts:
+        return False
+    # 전부가 헤더 토큰일 때만 헤더 행으로 본다(혼합이면 데이터로 취급)
+    for t in texts:
+        tt = re.sub(r"[\s\u00a0\u3000]+", "", t)
+        if tt not in _BEAM_HEADER_TOKENS:
+            return False
+    return True
+
+
+def _row_has_any_beam_header_token(row: list[dict[str, Any]]) -> bool:
+    texts = _row_nonempty_texts(row)
+    for t in texts:
+        tt = re.sub(r"[\s\u00a0\u3000]+", "", t)
+        if tt in _BEAM_HEADER_TOKENS:
+            return True
+    return False
+
+
+def merge_beam_sparse_row_clusters(
+    rows: list[list[dict[str, Any]]],
+    y_tol: float,
+    *,
+    max_glue_row_items: int = 4,
+    max_merged_row_items: int = 512,
+    y_gap_max: float | None = None,
+    block_header_mark_merge: bool = True,
+) -> list[list[dict[str, Any]]]:
+    """
+    가로로 긴 한 줄이 Y만 조금씩 달라 `cluster_rows` 에 여러 얇은 행으로 쪼개진 경우,
+    인접 행을 하나의 수평 묶음으로 이어 붙인다.
+
+    - **흡수 조건**: 바로 아래(또는 위)로 붙일 행(`nxt`)의 텍스트 수가 `max_glue_row_items` 이하이고,
+      Y중심 차가 `y_gap_max` 이하이며, 합친 총 개수가 `max_merged_row_items` 이하일 때만 병합.
+    - 이미 넓게 묶인 `cur` 는 길이 제한까지 계속 병합 가능(가로 일람 전체 한 줄 대응).
+    """
+    rows = [r for r in rows if r]
+    if len(rows) < 2:
+        return rows
+    gap = y_gap_max if y_gap_max is not None and y_gap_max > 0 else max(float(y_tol) * 3.5, 10.0)
+    glue = max(1, int(max_glue_row_items))
+    cap = max(glue * 2, int(max_merged_row_items))
+
+    indexed = [(i, _row_mean_y(r), r) for i, r in enumerate(rows)]
+    indexed.sort(key=lambda t: -t[1])
+    sorted_rows = [t[2] for t in indexed]
+
+    merged: list[list[dict[str, Any]]] = []
+    cur = list(sorted_rows[0])
+    cur_my = _row_mean_y(cur)
+
+    for nxt in sorted_rows[1:]:
+        n_my = _row_mean_y(nxt)
+        if block_header_mark_merge:
+            # "부호/형태/상·하부근/스트럽" 같은 헤더가 부호명(RG2 등)과 한 줄로 합쳐지는 것을 방지
+            if (
+                (_row_has_any_beam_header_token(cur) and _row_has_beam_mark_like(nxt))
+                or (_row_has_any_beam_header_token(nxt) and _row_has_beam_mark_like(cur))
+            ):
+                merged.append(cur)
+                cur = list(nxt)
+                cur_my = n_my
+                continue
+        can = (
+            len(nxt) <= glue
+            and len(cur) + len(nxt) <= cap
+            and abs(cur_my - n_my) <= gap
+        )
+        if can:
+            cur.extend(nxt)
+            cur.sort(key=lambda r: float(r["x"]))
+            ys = [float(r["y"]) for r in cur]
+            cur_my = sum(ys) / len(ys) if ys else cur_my
+            continue
+        merged.append(cur)
+        cur = list(nxt)
+        cur_my = n_my
+    merged.append(cur)
+    return merged
+
+
+def bridge_beam_sparse_row_clusters(
+    rows: list[list[dict[str, Any]]],
+    y_gap: float,
+    *,
+    max_endpoint_items: int = 4,
+    max_intermediate_row_items: int = 1,
+    max_merged_row_items: int = 512,
+    max_bridge_passes: int = 1,
+    y_gap_for_mark_endpoints: float | None = None,
+) -> list[list[dict[str, Any]]]:
+    """
+    가로로 멀리 떨어진 **같은 띠**(부호 행 등)가 Y만 비슷한데, 중간에 `cluster_rows` 가
+    다른 얇은 행을 끼워 **연속 병합**으로는 못 잇는 경우: 끝 두 행만 한 수평 묶음으로 합친다.
+
+    - 후보 두 행 i,j에 대해 `|mean_y(i)-mean_y(j)| <= y_gap` 이고 끝점 텍스트 수 한도 이하이며,
+      **mean_y 가 두 끝의 Y사이(열린 구간)** 에 있고 텍스트 수가 `max_intermediate_row_items` 를 넘는
+      다른 행이 있으면 병합하지 않는다(가로로 멀어도 그 사이에 END 등이 끼면 차단).
+    - `max_bridge_passes` 기본 1 — 부호↔부호 한 번만 잇고, 그 다음 얇은 행까지 연쇄 병합하지 않음.
+    """
+    rows = [list(r) for r in rows if r]
+    if len(rows) < 2:
+        return rows
+    gap = float(y_gap) if y_gap > 0 else 10.0
+    mark_gap = (
+        float(y_gap_for_mark_endpoints)
+        if y_gap_for_mark_endpoints is not None and float(y_gap_for_mark_endpoints) > 0
+        else gap
+    )
+    ep = max(2, int(max_endpoint_items))
+    mid_max = max(0, int(max_intermediate_row_items))
+    cap = max(16, int(max_merged_row_items))
+    passes = max(1, int(max_bridge_passes))
+
+    def sort_key(rs: list[list[dict[str, Any]]]) -> None:
+        rs.sort(key=lambda r: -_row_mean_y(r))
+
+    sort_key(rows)
+
+    def try_one_merge() -> bool:
+        n = len(rows)
+        best: tuple[float, int, int] | None = None
+        for i in range(n):
+            for j in range(i + 1, n):
+                ri, rj = rows[i], rows[j]
+                # 헤더(부호/형태/상부근 등)는 가교 병합 대상이 아님 — 부호명끼리만 잇는다.
+                if _row_has_any_beam_header_token(ri) or _row_has_any_beam_header_token(rj):
+                    continue
+                if len(ri) > ep or len(rj) > ep:
+                    continue
+                if len(ri) + len(rj) > cap:
+                    continue
+                dy = abs(_row_mean_y(ri) - _row_mean_y(rj))
+                # 부호명(예: RG2 vs RG2C) 끼리는 도면에서 Y가 더 크게 흔들려도 같은 띠로 보는 경우가 있어 완화
+                allow = mark_gap if (_row_has_beam_mark_like(ri) and _row_has_beam_mark_like(rj)) else gap
+                if dy > allow:
+                    continue
+                my_i = _row_mean_y(ri)
+                my_j = _row_mean_y(rj)
+                y_lo = min(my_i, my_j)
+                y_hi = max(my_i, my_j)
+                ok_mid = True
+                if y_hi - y_lo > 1e-9:
+                    for k, rk in enumerate(rows):
+                        if k in (i, j):
+                            continue
+                        my_k = _row_mean_y(rk)
+                        if y_lo < my_k < y_hi and len(rk) > mid_max:
+                            ok_mid = False
+                            break
+                if not ok_mid:
+                    continue
+                cand = (dy, i, j)
+                if best is None or cand[0] < best[0]:
+                    best = cand
+        if best is None:
+            return False
+        _, bi, bj = best
+        ri, rj = rows[bi], rows[bj]
+        merged = ri + rj
+        merged.sort(key=lambda r: float(r["x"]))
+        rows[bi] = merged
+        del rows[bj]
+        sort_key(rows)
+        return True
+
+    for _ in range(passes):
+        if not try_one_merge():
+            break
     return rows
 
 
@@ -1895,10 +2167,14 @@ def _row_data_anchor_y_from_strip(
     strip: list[dict[str, Any]],
     y_lo: float,
     y_hi: float,
+    *,
+    strip_item_allow: Callable[[dict[str, Any]], bool] | None = None,
 ) -> float | None:
     """해당 템플릿 세그먼트 Y구간에 걸리는 우측(값) 엔티티 Y 중앙값 — 단면 조회 세로 중심."""
     ys: list[float] = []
     for it in strip:
+        if strip_item_allow is not None and not strip_item_allow(it):
+            continue
         try:
             y = float(it["y"])
         except (TypeError, KeyError, ValueError):
@@ -1915,9 +2191,11 @@ def _row_data_anchor_y_from_strip_relaxed(
     y_lo: float,
     y_hi: float,
     band_y_tol: float,
+    *,
+    strip_item_allow: Callable[[dict[str, Any]], bool] | None = None,
 ) -> float | None:
     """좌·우 열 Y가 어긋진 도면: 구간을 넓혀 한 번 더 시도."""
-    rda = _row_data_anchor_y_from_strip(strip, y_lo, y_hi)
+    rda = _row_data_anchor_y_from_strip(strip, y_lo, y_hi, strip_item_allow=strip_item_allow)
     if rda is not None:
         return rda
     span = max(y_hi - y_lo, float(band_y_tol) * 12.0, 120.0)
@@ -1927,7 +2205,7 @@ def _row_data_anchor_y_from_strip_relaxed(
     pad_cap = span * 0.24 + max(280.0, float(band_y_tol) * 14.0)
     pad = min(pad_raw, pad_cap)
     mid = 0.5 * (y_lo + y_hi)
-    return _row_data_anchor_y_from_strip(strip, mid - pad, mid + pad)
+    return _row_data_anchor_y_from_strip(strip, mid - pad, mid + pad, strip_item_allow=strip_item_allow)
 
 
 def _split_dyn_by_template_segments(
@@ -2561,6 +2839,31 @@ def extract_schedule(
     except (TypeError, ValueError):
         beam_band_y_tol = None
 
+    brmm_raw = raw.get("beam_row_merge_y_max")
+    try:
+        beam_row_merge_y_max = float(brmm_raw) if brmm_raw is not None and brmm_raw != "" else None
+    except (TypeError, ValueError):
+        beam_row_merge_y_max = None
+
+    def _optional_positive_int(v: Any) -> int | None:
+        if v is None or v == "":
+            return None
+        try:
+            n = int(v)
+            return n if n > 0 else None
+        except (TypeError, ValueError):
+            return None
+
+    beam_row_merge_max_glue = _optional_positive_int(raw.get("beam_row_merge_max_glue"))
+    beam_row_merge_max_merged = _optional_positive_int(raw.get("beam_row_merge_max_merged"))
+    beam_row_bridge_max_endpoint = _optional_positive_int(raw.get("beam_row_bridge_max_endpoint"))
+    beam_row_bridge_max_mid = _optional_positive_int(raw.get("beam_row_bridge_max_mid"))
+    beam_row_bridge_passes = _optional_positive_int(raw.get("beam_row_bridge_passes"))
+
+    inc_empty = category == CATEGORY_BEAM
+    if isinstance(raw, dict) and raw.get("include_empty_text_entities") is False:
+        inc_empty = False
+
     cfg = ExtractionConfig(
         rules_version=str(raw.get("rules_version") or "1.0"),
         layer_include=list(raw.get("layer_include") or []),
@@ -2578,6 +2881,13 @@ def extract_schedule(
         column_band_y_tol=float(raw.get("column_band_y_tol") or 4.0),
         beam_layout=str(raw.get("beam_layout") or "auto").strip().lower(),
         beam_band_y_tol=beam_band_y_tol,
+        include_empty_text_entities=inc_empty,
+        beam_row_merge_y_max=beam_row_merge_y_max,
+        beam_row_merge_max_glue=beam_row_merge_max_glue,
+        beam_row_merge_max_merged=beam_row_merge_max_merged,
+        beam_row_bridge_max_endpoint=beam_row_bridge_max_endpoint,
+        beam_row_bridge_max_mid=beam_row_bridge_max_mid,
+        beam_row_bridge_passes=beam_row_bridge_passes,
     )
 
     items = load_text_entities(db, commit_id, cfg)
@@ -2593,16 +2903,116 @@ def extract_schedule(
             "selection_bbox": list(selection_bbox) if selection_bbox else None,
             "selection_bboxes": [list(b) for b in selection_bboxes] if selection_bboxes else None,
         }
+        # 디버그/배포 확인용 태그(프론트에서 표시). 이 값이 보이지 않으면 다른 서버/옛 코드에 요청 중.
+        validation["_illam_server_tag"] = "beam_flat_cad_outline_first_v3"
         validation.update(beam_validation)
+        # --- 보 가로묶음(Y행 클러스터) 디버그: 추출 로직과 무관하게 항상 요약 제공 ---
+        # (프론트는 run.validation.beam_row_clusters + beam_row_cluster_merge 를 그대로 표시/복사)
+        try:
+            rows_raw = cluster_rows(items, cfg.y_tolerance)
+            gap_used = (
+                float(cfg.beam_row_merge_y_max)
+                if cfg.beam_row_merge_y_max is not None and float(cfg.beam_row_merge_y_max) > 0
+                else max(float(cfg.y_tolerance) * 3.5, 10.0)
+            )
+            glue_n = int(cfg.beam_row_merge_max_glue) if cfg.beam_row_merge_max_glue is not None else 4
+            if glue_n < 1:
+                glue_n = 4
+            cap_n = int(cfg.beam_row_merge_max_merged) if cfg.beam_row_merge_max_merged is not None else 512
+            if cap_n < 8:
+                cap_n = 512
+            br_ep = (
+                int(cfg.beam_row_bridge_max_endpoint)
+                if cfg.beam_row_bridge_max_endpoint is not None
+                else 4
+            )
+            if br_ep < 2:
+                br_ep = 2
+            br_mid = int(cfg.beam_row_bridge_max_mid) if cfg.beam_row_bridge_max_mid is not None else 1
+            if br_mid < 0:
+                br_mid = 0
+            br_pass = (
+                int(cfg.beam_row_bridge_passes) if cfg.beam_row_bridge_passes is not None else 1
+            )
+            if br_pass < 1:
+                br_pass = 1
+
+            rows_sparse = merge_beam_sparse_row_clusters(
+                rows_raw,
+                cfg.y_tolerance,
+                y_gap_max=gap_used,
+                max_glue_row_items=glue_n,
+                max_merged_row_items=cap_n,
+            )
+            # mark-like(부호명)끼리는 Y가 더 흔들릴 수 있음(예: RG2 vs RG2C)
+            mark_gap = (
+                float(raw.get("beam_row_merge_y_max_mark"))
+                if isinstance(raw, dict) and raw.get("beam_row_merge_y_max_mark") not in (None, "")
+                else max(float(gap_used), 80.0)
+            )
+            rows_dbg = bridge_beam_sparse_row_clusters(
+                rows_sparse,
+                float(gap_used),
+                max_endpoint_items=br_ep,
+                max_intermediate_row_items=br_mid,
+                max_merged_row_items=cap_n,
+                max_bridge_passes=br_pass,
+                y_gap_for_mark_endpoints=mark_gap,
+            )
+            validation["row_cluster_y_tolerance"] = cfg.y_tolerance
+            validation["beam_row_clusters"] = beam_row_clusters_for_validation(rows_dbg)
+            validation["beam_row_cluster_merge"] = {
+                "before_row_count": len(rows_raw),
+                "after_sparse_merge_row_count": len(rows_sparse),
+                "after_bridge_row_count": len(rows_dbg),
+                "y_gap_max_used": round(float(gap_used), 4),
+                "y_gap_max_mark_used": round(float(mark_gap), 4) if mark_gap is not None else None,
+                "max_glue_row_items": int(glue_n),
+                "max_merged_row_items": int(cap_n),
+                "bridge_max_endpoint_items": int(br_ep),
+                "bridge_max_mid_row_items": int(br_mid),
+                "bridge_passes": int(br_pass),
+            }
+        except Exception as ex:
+            validation["beam_row_cluster_merge_error"] = f"{type(ex).__name__}: {ex}"[:300]
         if (selection_bboxes or selection_bbox) and len(items) == 0:
             validation["warning"] = (
                 "선택 영역 안에 TEXT/MTEXT/ATTRIB 삽입점이 없습니다. 영역을 넓히거나 도면을 확인하세요."
             )
-        if beam_validation.get("beam_vertical_blocks") and raw.get("column_section_geometry", True) is not False:
+        bv = beam_validation or {}
+        _st = bv.get("beam_vertical_strips")
+        _fh = bv.get("beam_vertical_field_headers")
+        strips_ok = isinstance(_st, list) and len(_st) > 0
+        headers_ok = isinstance(_fh, list) and len(_fh) > 0
+        layout_res = str(bv.get("beam_layout_resolved") or "").strip().lower()
+        csg_on = raw.get("column_section_geometry", True) is not False
+        # 번들 플래그만 True이고 스트립·헤더가 비면 enrich_rows_beam_vertical_section_geometry_zones 가
+        # 곧바로 return 하므로, 실제로 스트립/헤더가 있을 때만 세로 존 경로를 탄다.
+        _do_beam_vertical_zones = csg_on and (
+            (bv.get("beam_vertical_blocks") is True)
+            or (bv.get("beam_row_cluster_bundle") is True and strips_ok and headers_ok)
+            or strips_ok
+            or headers_ok
+        )
+        has_flat_role = any(str(r.get("beam_row_role") or "") == "beam_flat" for r in rows_out)
+        _do_beam_flat_geo = csg_on and bool(rows_out) and (layout_res == "flat" or has_flat_role)
+        clip_bbs: list[tuple[float, float, float, float]] = list(selection_bboxes)
+        if selection_bbox is not None:
+            clip_bbs.append(selection_bbox)
+        clip_arg = clip_bbs if clip_bbs else None
+        validation["beam_section_geo_debug"] = {
+            "layout_res": layout_res,
+            "csg_on": csg_on,
+            "do_vertical_zones": _do_beam_vertical_zones,
+            "do_flat_geo": _do_beam_flat_geo,
+            "strips_ok": strips_ok,
+            "headers_ok": headers_ok,
+            "has_flat_role": has_flat_role,
+        }
+        validation["beam_flat_section_geometry"] = False
+        if _do_beam_vertical_zones:
+            validation["beam_section_geo_branch"] = "vertical_zones"
             try:
-                clip_bbs: list[tuple[float, float, float, float]] = list(selection_bboxes)
-                if selection_bbox is not None:
-                    clip_bbs.append(selection_bbox)
                 enrich_rows_beam_vertical_section_geometry_zones(
                     db,
                     commit_id,
@@ -2612,10 +3022,27 @@ def extract_schedule(
                     half_width=_optional_positive_float(raw, "column_section_half_width"),
                     half_height=_optional_positive_float(raw, "column_section_half_height"),
                     include_block_definitions=raw.get("column_section_block_geometry", True) is not False,
-                    selection_world_bboxes=clip_bbs if clip_bbs else None,
+                    selection_world_bboxes=clip_arg,
                 )
             except Exception as ex:
                 validation["section_geometry_error"] = f"{type(ex).__name__}: {ex}"[:400]
+        elif _do_beam_flat_geo:
+            validation["beam_section_geo_branch"] = "flat"
+            try:
+                enrich_rows_beam_flat_section_geometry(
+                    db,
+                    commit_id,
+                    rows_out,
+                    half_width=_optional_positive_float(raw, "column_section_half_width"),
+                    half_height=_optional_positive_float(raw, "column_section_half_height"),
+                    include_block_definitions=raw.get("column_section_block_geometry", True) is not False,
+                    selection_world_bboxes=clip_arg,
+                )
+                validation["beam_flat_section_geometry"] = True
+            except Exception as ex:
+                validation["section_geometry_error"] = f"{type(ex).__name__}: {ex}"[:400]
+        else:
+            validation["beam_section_geo_branch"] = "none"
 
         validation["duplicate_row_indices"] = _detect_duplicates(rows_out, beam_duplicate_key)
         return rows_out, validation

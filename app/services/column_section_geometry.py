@@ -1,5 +1,7 @@
 """
 기둥 일람 SECTION 칸 단면도: 원(주근)·직선(띠근) 기하를 읽고 MAIN BAR 텍스트와 대조.
+일반적인 RC 단면도(내부 원 다발 + 직사각 띠·내부 세로/가로 선)를 가정한다 — CIRCLE/ARC·닫힌 LWPLINE(원형)·HATCH 면을 주근 후보로,
+LINE/LWPOLYLINE(LineString)을 띠근·외곽 후보로 `_collect_circles_lines_radii` 에서 동시에 수집한다.
 
 - 단면 주근 박스 가까이의 가로·세로 치수선(LINE)과 순수 숫자 TEXT(500, 700 등)로 B·H(mm)를 추정해
   행의 width_mm·depth_mm에 반영한다(치수선과 TEXT가 어긋나면 치수선 길이를 우선).
@@ -8,7 +10,7 @@
 - Top-Bot / Left-Right: 직사각 배치에서 상·하변 주근 수와 좌·우변(모서리 제외) 주근 수.
   표기 예: 4-D19, 3-D19 → (4+3)*2 = 14 본.
 - 가로 띠근 → X-Tie Bar, 세로 띠근 → Y-Tie Bar (외곽 사각형에 붙은 선은 제외).
-- 겹치는 원(중심 근접)은 하나로 병합.
+- 겹치는 원(중심 근접)은 하나로 병합. HATCH·작은 POLYGON 면(원형·촘촘한 채움)은 주근 후보로 중심·등가 반경을 추정해 포함한다.
 - 검색은 느슨한 bbox로 1차 적재 후, 주근 중심의 중앙선(median)·간격 기반 클러스터로 단면 범위를 좁혀 분석한다.
   (클러스터 선택 시 1점 스파이크가 앵커에 더 가깝다고 전체 주근 덩어리를 이기지 않도록, 최소 개수 이상만 후보로 삼는다.)
 - 닫힌 LWPOLYLINE 직사각 외곽(주근 원보다 바깥) 중 주근을 모두 포함하는 것 중 면적이 가장 큰 것을 단면 B×H(mm)로 추정한다.
@@ -31,6 +33,12 @@ except ImportError:
     from shapely.wkt import loads as shapely_from_wkt
 
 from app.models import BlockDef, BlockInsert, Entity
+from app.services.beam_flat_spatial import (
+    beam_flat_row_has_beam_mark,
+    beam_flat_schedule_tight_y_bounds,
+    beam_flat_section_focus_y_bounds,
+    beam_flat_x_slabs,
+)
 from app.utils.geom import transform_block_wkt_to_world
 
 _RE_MAIN_BAR = re.compile(
@@ -38,6 +46,7 @@ _RE_MAIN_BAR = re.compile(
     re.I,
 )
 _RE_PURE_SECTION_DIM_MM = re.compile(r"^\s*(\d{2,4})\s*$")
+_RE_MARK_DIMS = re.compile(r"\(\s*(\d{2,5})\s*[xX×*]\s*(\d{2,5})\s*\)")
 
 
 def _compact_header_for_match(s: str | None) -> str:
@@ -74,6 +83,66 @@ def parse_main_bar_spec(text: str | None) -> tuple[int | None, int | None]:
     if not m:
         return None, None
     return int(m.group(1)), int(m.group(2))
+
+
+def _beam_schedule_main_bar_text_for_section(r: dict[str, Any]) -> str | None:
+    """
+    보 일람 행에서 주근 본수 힌트용 문자열.
+    세로 블록은 MAIN_BAR 가 있고, 가로 와이드·Location·행 묶음은 *_top_bar 등에만 있을 수 있다.
+    """
+    for k in (
+        "MAIN_BAR",
+        "int_top_bar",
+        "cen_top_bar",
+        "ext_top_bar",
+        "int_bot_bar",
+        "cen_bot_bar",
+        "ext_bot_bar",
+        "top_bar",
+        "bot_bar",
+    ):
+        t = str(r.get(k) or "").strip()
+        if not t:
+            continue
+        if parse_main_bar_spec(t)[0] is not None:
+            return t
+    return None
+
+
+def _beam_depth_hint_mm_for_flat_row(r: dict[str, Any]) -> int | None:
+    """flat 행에서 depth_mm가 비어도 부호 괄호치수 '(BxH)'로 H를 추정한다."""
+    d0 = r.get("depth_mm")
+    if isinstance(d0, int) and d0 >= 180:
+        return int(d0)
+    for k in ("mark", "name", "member_label"):
+        s = str(r.get(k) or "").strip()
+        if not s:
+            continue
+        m = _RE_MARK_DIMS.search(s)
+        if not m:
+            continue
+        try:
+            h = int(m.group(2))
+        except (TypeError, ValueError):
+            continue
+        if 180 <= h <= 9000:
+            return h
+    ents = r.get("_flat_sorted_entities")
+    if isinstance(ents, list):
+        for it in ents:
+            s = str((it or {}).get("text") or "").strip()
+            if not s:
+                continue
+            m = _RE_MARK_DIMS.search(s)
+            if not m:
+                continue
+            try:
+                h = int(m.group(2))
+            except (TypeError, ValueError):
+                continue
+            if 180 <= h <= 9000:
+                return h
+    return None
 
 
 def _median_float(vals: list[float]) -> float:
@@ -123,7 +192,7 @@ def _polyline_as_rebar_circle(et: str, shp) -> tuple[tuple[float, float], float]
     if gt != "LineString":
         return None
     coords = list(shp.coords)
-    if len(coords) < 10:
+    if len(coords) < 8:
         return None
     x0, y0 = coords[0][0], coords[0][1]
     xn, yn = coords[-1][0], coords[-1][1]
@@ -176,6 +245,8 @@ def _load_shapes_in_bbox(
         "ARC",
         "POINT",
         "ELLIPSE",
+        "HATCH",
+        "POLYGON",
     ),
 ) -> list[tuple[str, Any, str | None]]:
     """(entity_type, shapely geometry, layer) — bbox와 교차하는 것만."""
@@ -297,6 +368,8 @@ def _load_shapes_from_block_definitions(
                 "ARC",
                 "POINT",
                 "ELLIPSE",
+                "HATCH",
+                "POLYGON",
             ):
                 continue
             item_props = item.get("props") if isinstance(item.get("props"), dict) else {}
@@ -711,6 +784,7 @@ def _bbox_from_centerline_cluster(
     expected_main_bars: int | None = None,
     anchor_y_bounds: tuple[float, float] | None = None,
     beam_like_section: bool = False,
+    beam_flat_suppress_full_band_fallback: bool = False,
 ) -> tuple[tuple[float, float, float, float] | None, dict[str, Any]]:
     """
     주근 중심들의 중앙선(median x, median y)을 기준으로,
@@ -1010,8 +1084,49 @@ def _bbox_from_centerline_cluster(
             clusters_active = clusters2
             eps_link = eps2
     if best is None and len(work) >= min_cluster:
-        best = list(work)
-        meta["reason"] = "fallback_y_band_points"
+        if beam_flat_suppress_full_band_fallback:
+            span_ref = 900.0
+            if anchor_y_bounds is not None and len(anchor_y_bounds) >= 2:
+                try:
+                    _a0, _a1 = float(anchor_y_bounds[0]), float(anchor_y_bounds[1])
+                    if _a1 > _a0:
+                        span_ref = _a1 - _a0
+                except (TypeError, ValueError):
+                    pass
+            half_win = max(380.0, min(2100.0, span_ref * 0.55 + 200.0))
+            near = [p for p in work if abs(p[1] - y_ref) <= half_win]
+            meta["beam_flat_near_y_ref_half_width"] = round(half_win, 4)
+            meta["beam_flat_near_y_ref_candidates"] = len(near)
+            if len(near) >= min_cluster:
+                clusters_nf = _cluster_points_by_eps(near, eps_link)
+                if beam_like_section and clusters_nf:
+                    clusters_nf = _merge_beam_vertical_twin_rebar_clusters(
+                        clusters_nf,
+                        y_ref,
+                        strip_xc,
+                        gx,
+                        gy,
+                        min_cluster=min_cluster,
+                        meta=meta,
+                        max_centroid_dy=twin_merge_max_dy,
+                    )
+                clusters_nf = _filter_clusters_by_mainbar_expect(clusters_nf)
+                best = _pick_best_cluster_x(clusters_nf, min_cluster)
+                if best is None:
+                    for need2 in (3, 2):
+                        best = _pick_best_cluster_x(clusters_nf, need2)
+                        if best is not None:
+                            meta["reason"] = f"fallback_near_y_ref_relaxed_{need2}"
+                            break
+                if best is None:
+                    best = near
+                    meta["reason"] = "fallback_near_y_only_beam_flat"
+            if best is None:
+                meta["reason"] = "beam_flat_refused_full_y_band"
+                return None, meta
+        else:
+            best = list(work)
+            meta["reason"] = "fallback_y_band_points"
     elif best is None:
         for need2 in (3, 2):
             best = _pick_best_cluster_x(clusters_active, need2)
@@ -1279,6 +1394,44 @@ def _pick_beam_stem_section_outline_mm(
     return w_mm, h_mm, meta
 
 
+def _compact_polygon_as_rebar_marker(poly, et: str) -> tuple[tuple[float, float], float] | None:
+    """
+    HATCH·SOLID 면, 블록 안 작은 폴리곤 등 — 원(CIRCLE) 대신 면으로만 그린 주근·스터럽 후보.
+    너무 큰 면(단면 전체 채움)은 제외한다.
+    """
+    try:
+        ar = float(poly.area)
+        if ar < 100.0 or ar > 92000.0:
+            return None
+        ex = poly.exterior
+        per = float(ex.length)
+    except Exception:
+        return None
+    if per < 1e-6:
+        return None
+    circ = (4.0 * math.pi * ar) / (per * per)
+    try:
+        b = poly.bounds
+        bw, bh = b[2] - b[0], b[3] - b[1]
+    except Exception:
+        return None
+    if bw <= 0 or bh <= 0:
+        return None
+    compact = min(bw, bh) / max(bw, bh)
+    # 원·타원형 채움 또는 작은 직사각(블록 내 주근 단면)
+    if circ < 0.36 and compact < 0.58:
+        return None
+    if str(et).upper() == "HATCH" and ar > 52000.0:
+        return None
+    try:
+        c = poly.centroid
+        xy = (float(c.x), float(c.y))
+    except Exception:
+        return None
+    r = max(1.5, math.sqrt(max(ar, 1.0) / math.pi))
+    return xy, r
+
+
 def _collect_circles_lines_radii(
     shapes: list[tuple[str, Any, str | None]],
 ) -> tuple[list[tuple[float, float]], list[float], list[LineString]]:
@@ -1328,6 +1481,28 @@ def _collect_circles_lines_radii(
             continue
         if gt == "LineString" and et == "LINE":
             lines_out.append(LineString(list(shp.coords)))
+            continue
+        if gt == "Polygon":
+            pr = _compact_polygon_as_rebar_marker(shp, et)
+            if pr:
+                xy, r = pr
+                circle_centers.append(xy)
+                if r:
+                    radii.append(r)
+            continue
+        if gt == "MultiPolygon":
+            try:
+                geoms = list(shp.geoms)
+            except Exception:
+                geoms = []
+            for g in geoms:
+                pr = _compact_polygon_as_rebar_marker(g, et)
+                if pr:
+                    xy, r = pr
+                    circle_centers.append(xy)
+                    if r:
+                        radii.append(r)
+            continue
     return circle_centers, radii, lines_out
 
 
@@ -1669,6 +1844,15 @@ def analyze_section_geometry(
 ) -> dict[str, Any]:
     """도형 목록에서 주근·띠근 집계 및 텍스트와 비교."""
     circle_centers, radii, lines_out = _collect_circles_lines_radii(shapes)
+    line_poly_count = len(lines_out)
+    line_seg_approx = 0
+    for ln in lines_out:
+        if ln is None or ln.is_empty:
+            continue
+        try:
+            line_seg_approx += max(0, len(ln.coords) - 1)
+        except Exception:
+            line_seg_approx += 1
 
     if not circle_centers:
         bad: dict[str, Any] = {
@@ -1677,6 +1861,11 @@ def analyze_section_geometry(
             "main_bar_text_count": parse_main_bar_spec(main_bar_text)[0],
             "debug_circle_count_raw": 0,
             "debug_circle_centers_merged": [],
+            "line_polyline_count": line_poly_count,
+            "line_segment_count_approx": line_seg_approx,
+            "section_guess_pattern": (
+                "lines_only_no_circles" if line_poly_count else "empty_shapes"
+            ),
         }
         if shape_sources:
             bad["shape_sources"] = shape_sources
@@ -1788,6 +1977,11 @@ def analyze_section_geometry(
         "debug_circle_count_raw": len(circle_centers),
         "debug_circle_centers_merged": _merged_preview,
         "debug_circle_centers_merged_truncated": len(merged) > _preview_cap,
+        "line_polyline_count": line_poly_count,
+        "line_segment_count_approx": line_seg_approx,
+        "section_guess_pattern": (
+            "circles_with_tie_lines" if line_poly_count >= 2 else "circles_minimal_lines"
+        ),
     }
     if shape_sources:
         out["shape_sources"] = shape_sources
@@ -1903,6 +2097,42 @@ def _pick_viewport_y_clip_for_section(
     return (my0 - pad_y, my1 + pad_y)
 
 
+def _pick_selection_bbox_for_section(
+    xc: float,
+    y_anchor: float,
+    boxes: list[tuple[float, float, float, float]],
+) -> tuple[float, float, float, float] | None:
+    """단면 계산에 사용할 선택 박스 1개를 고른다(선택 박스 내부 도형만 사용)."""
+    if not boxes:
+        return None
+    normed = [_norm_bbox4(b) for b in boxes]
+    x_hit = [b for b in normed if b[0] <= xc <= b[2]]
+    cand = x_hit if x_hit else normed
+
+    def _score(b: tuple[float, float, float, float]) -> tuple[int, float, float]:
+        bx0, by0, bx1, by1 = b
+        if by0 <= y_anchor <= by1:
+            return (0, float(by1 - by0), abs(0.5 * (bx0 + bx1) - xc))
+        if y_anchor < by0:
+            return (1, float(by0 - y_anchor), abs(0.5 * (bx0 + bx1) - xc))
+        return (1, float(y_anchor - by1), abs(0.5 * (bx0 + bx1) - xc))
+
+    return min(cand, key=_score)
+
+
+def _intersect_bbox(
+    a: tuple[float, float, float, float],
+    b: tuple[float, float, float, float],
+) -> tuple[float, float, float, float] | None:
+    ax0, ay0, ax1, ay1 = _norm_bbox4(a)
+    bx0, by0, bx1, by1 = _norm_bbox4(b)
+    ix0, iy0 = max(ax0, bx0), max(ay0, by0)
+    ix1, iy1 = min(ax1, bx1), min(ay1, by1)
+    if ix1 <= ix0 or iy1 <= iy0:
+        return None
+    return (ix0, iy0, ix1, iy1)
+
+
 def _clip_bbox_loose_y(
     bbox_loose: tuple[float, float, float, float],
     y0: float,
@@ -1931,17 +2161,200 @@ def _section_template_y(field_headers: list[dict[str, Any]] | None) -> float | N
 
 
 def is_beam_vertical_table_row(r: dict[str, Any]) -> bool:
-    """보 세로 블록(병합 행·폴백 레이아웃 포함) — 단면 enrich·클러스터 분기용."""
+    """보 세로 블록·가로 묶음 번들·가로 와이드/Location(합성 스트립) — 단면 enrich·클러스터 분기용."""
     bl = str(r.get("beam_layout") or "")
     br = str(r.get("beam_row_role") or "")
     if bl.startswith("vertical_blocks"):
         return True
+    if bl == "row_cluster_bundle":
+        return True
+    if bl in ("horizontal_wide", "horizontal_location_tree"):
+        return True
+    if bl == "flat" or br == "beam_flat":
+        return True
     if br == "beam_vertical_block":
+        return True
+    if br == "beam_row_cluster_bundle":
         return True
     mis = r.get("beam_vertical_merged_strip_indices")
     if isinstance(mis, list) and len(mis) > 0:
         return True
     return False
+
+
+def enrich_rows_beam_flat_section_geometry(
+    db: Session,
+    commit_id: int,
+    rows: list[dict[str, Any]],
+    *,
+    half_width: Optional[float] = None,
+    half_height: Optional[float] = None,
+    include_block_definitions: bool = True,
+    selection_world_bboxes: list[tuple[float, float, float, float]] | None = None,
+) -> None:
+    """가로 flat 보: `_flat_sorted_entities`가 있으면 X 간격으로 열(슬랩)을 나눠 열마다 단면 enrich.
+
+    열이 하나이거나 엔티티 목록이 없으면 `row_entity_bbox` 한 덩어리로 기존과 동일하게 동작한다.
+    """
+    if not rows:
+        return
+    synth: list[dict[str, Any]] = []
+    strip_infos: list[dict[str, Any]] = []
+    meta: list[tuple[int, int]] = []
+    y_means: list[float] = []
+
+    for orig_i, r in enumerate(rows):
+        if str(r.get("beam_row_role") or "") != "beam_flat":
+            continue
+        if not beam_flat_row_has_beam_mark(r):
+            r.setdefault(
+                "section_geometry",
+                {"ok": False, "reason": "flat_schedule_row_no_beam_mark"},
+            )
+            continue
+
+        def _append_synth(
+            lo_x: float,
+            lo_y: float,
+            hi_x: float,
+            hi_y: float,
+            slab_idx: int,
+            fy: tuple[float, float] | None,
+            base: dict[str, Any],
+        ) -> None:
+            r2 = dict(base)
+            r2["row_entity_bbox"] = [
+                round(lo_x, 4),
+                round(lo_y, 4),
+                round(hi_x, 4),
+                round(hi_y, 4),
+            ]
+            my = 0.5 * (lo_y + hi_y)
+            r2["row_data_anchor_y_bounds"] = [round(lo_y, 4), round(hi_y, 4)]
+            r2["row_data_anchor_y"] = round(my, 4)
+            r2["row_y_mean"] = round(my, 4)
+            if fy is not None:
+                fy0, fy1 = float(fy[0]), float(fy[1])
+                if fy1 > fy0 and (fy1 - fy0) >= 200.0:
+                    r2["beam_flat_section_focus_y_bounds"] = [round(fy0, 4), round(fy1, 4)]
+                    r2["row_data_anchor_y_bounds"] = [round(fy0, 4), round(fy1, 4)]
+                    mid = 0.5 * (fy0 + fy1)
+                    r2["row_data_anchor_y"] = round(mid, 4)
+                    r2["row_y_mean"] = round(mid, 4)
+            else:
+                r2.pop("beam_flat_section_focus_y_bounds", None)
+            jloc = len(synth)
+            r2["column_strip_index"] = jloc
+            synth.append(r2)
+            strip_infos.append({"x_center": round(0.5 * (lo_x + hi_x), 4)})
+            meta.append((orig_i, slab_idx))
+            y_means.append(float(r2["row_y_mean"]))
+
+        added_slabs = False
+        ent = r.get("_flat_sorted_entities")
+        if isinstance(ent, list) and len(ent) >= 1:
+            slabs = beam_flat_x_slabs(ent)
+            for slab_idx, slab in enumerate(slabs):
+                if not slab:
+                    continue
+                try:
+                    xs = [float(e["x"]) for e in slab]
+                    ys = [float(e["y"]) for e in slab]
+                except (TypeError, ValueError, KeyError):
+                    continue
+                lo_x, hi_x = min(xs), max(xs)
+                lo_y, hi_y = min(ys), max(ys)
+                if hi_x <= lo_x or hi_y <= lo_y:
+                    continue
+                fy_s = beam_flat_section_focus_y_bounds(slab)
+                if fy_s is None and (hi_y - lo_y) > 900.0:
+                    ty = beam_flat_schedule_tight_y_bounds(slab)
+                    if ty is not None:
+                        t_lo, t_hi = ty
+                        if (t_hi - t_lo) < (hi_y - lo_y) * 0.62 and (t_hi - t_lo) > 120.0:
+                            fy_s = ty
+                _append_synth(lo_x, lo_y, hi_x, hi_y, slab_idx, fy_s, r)
+                added_slabs = True
+        if added_slabs:
+            continue
+
+        bb = r.get("row_entity_bbox")
+        if not isinstance(bb, (list, tuple)) or len(bb) < 4:
+            r.setdefault("section_geometry", {"ok": False, "reason": "flat_row_no_bbox"})
+            continue
+        try:
+            lo_x, lo_y, hi_x, hi_y = float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])
+        except (TypeError, ValueError):
+            r.setdefault("section_geometry", {"ok": False, "reason": "flat_row_no_bbox"})
+            continue
+        if hi_x <= lo_x or hi_y <= lo_y:
+            r.setdefault("section_geometry", {"ok": False, "reason": "flat_row_no_bbox"})
+            continue
+        focus = r.get("beam_flat_section_focus_y_bounds")
+        fy_r: tuple[float, float] | None = None
+        if isinstance(focus, (list, tuple)) and len(focus) >= 2:
+            try:
+                fy0, fy1 = float(focus[0]), float(focus[1])
+                if fy1 > fy0 and (fy1 - fy0) >= 200.0:
+                    fy_r = (fy0, fy1)
+            except (TypeError, ValueError):
+                pass
+        _append_synth(lo_x, lo_y, hi_x, hi_y, 0, fy_r, r)
+
+    if not synth or not strip_infos:
+        return
+
+    y_sec = float(_median_float(y_means))
+    field_headers = [{"key": "SECTION", "label": "SECTION", "y": round(y_sec, 4)}]
+
+    enrich_rows_column_section_geometry(
+        db,
+        commit_id,
+        synth,
+        field_headers,
+        strip_infos,
+        half_width=half_width,
+        half_height=half_height,
+        include_block_definitions=include_block_definitions,
+        selection_world_bboxes=selection_world_bboxes,
+        strip_index_field="column_strip_index",
+        infer_table_dims=True,
+        beam_stem_outline=True,
+    )
+
+    by_orig: dict[int, list[tuple[int, dict[str, Any], dict[str, Any]]]] = {}
+    for j, (oi, slab_idx) in enumerate(meta):
+        by_orig.setdefault(oi, []).append((slab_idx, synth[j], strip_infos[j]))
+
+    for orig_i, parts in by_orig.items():
+        parts.sort(key=lambda t: t[0])
+        zlist = [
+            {
+                "slab_index": slab_idx,
+                "x_center": si.get("x_center"),
+                "section_geometry": src.get("section_geometry"),
+                "row_entity_bbox": src.get("row_entity_bbox"),
+            }
+            for slab_idx, src, si in parts
+        ]
+        primary_src: dict[str, Any] | None = None
+        for slab_idx, src, si in parts:
+            sg = src.get("section_geometry")
+            if sg and sg.get("ok"):
+                primary_src = src
+                break
+        if primary_src is None and parts:
+            primary_src = parts[0][1]
+        if primary_src is not None:
+            psg = primary_src.get("section_geometry")
+            rows[orig_i]["section_geometry"] = psg if psg else {"ok": False, "reason": "flat_no_geometry"}
+        for k in ("width_mm", "depth_mm", "size_mm", "SIZE"):
+            if primary_src and k in primary_src and primary_src.get(k) is not None:
+                rows[orig_i][k] = primary_src[k]
+        if len(zlist) > 1:
+            rows[orig_i]["beam_section_geometry_zones"] = zlist
+        else:
+            rows[orig_i].pop("beam_section_geometry_zones", None)
 
 
 def _field_headers_y_median_gap(field_headers: list[dict[str, Any]] | None) -> float:
@@ -2029,8 +2442,9 @@ def enrich_rows_column_section_geometry(
             r["section_geometry"] = {"ok": False, "reason": "bad_strip_index"}
             continue
         if not str(r.get("mark") or r.get("name") or r.get("member_label") or "").strip():
-            # 보 세로: 표 맨 앞·구간만 있는 행(부호 없이 도면만)도 스트립 0 단면이 있으면 기하 분석을 돌린다.
-            if str(r.get("beam_row_role") or "") != "beam_vertical_block":
+            # 보 세로·가로 flat: 부호 문자열이 없어도 행 bbox·스트립으로 단면 창을 연다.
+            br = str(r.get("beam_row_role") or "")
+            if br not in ("beam_vertical_block", "beam_flat"):
                 r["section_geometry"] = {"ok": False, "reason": "no_member_mark"}
                 continue
         xc = strip_infos[si].get("x_center")
@@ -2044,7 +2458,8 @@ def enrich_rows_column_section_geometry(
             continue
 
         # 병합 행도 beam_vertical_merged_strip_indices 로 보 세로로 취급 — T형 stem·느슨창 세로 제한 적용
-        use_beam_stem = beam_stem_outline and is_beam_vertical_table_row(r)
+        beam_vb = is_beam_vertical_table_row(r)
+        use_beam_stem = beam_stem_outline and beam_vb
 
         x_excl = _exclusive_strip_x_half_width(
             strip_infos,
@@ -2054,6 +2469,14 @@ def enrich_rows_column_section_geometry(
         hw_load = eff_hw
         if x_excl is not None and x_excl > 50.0:
             hw_load = min(eff_hw, max(x_excl * 2.38, 500.0))
+        # 표의 B(mm)·H(mm)로 느슨창·클러스터 X밴드를 줄여 이웃 부재·잡도형 혼입 완화(도면 1단위≈1mm 가정)
+        eff_hw_cluster = float(eff_hw)
+        if beam_vb:
+            rb = r.get("width_mm")
+            if isinstance(rb, int) and 180 <= rb <= 9000:
+                cap_x = max(420.0, min(float(rb) * 0.72 + 820.0, eff_hw, 5600.0))
+                hw_load = min(hw_load, cap_x)
+                eff_hw_cluster = min(eff_hw_cluster, cap_x)
 
         y_center = float(y_sec)
         anchor_source = "section_template_y"
@@ -2088,7 +2511,6 @@ def enrich_rows_column_section_geometry(
         anchor_y_bounds_arg: tuple[float, float] | None = None
         y_anchor = y_center
         segment_y_span: float | None = None
-        beam_vb = is_beam_vertical_table_row(r)
         if isinstance(bounds, (list, tuple)) and len(bounds) >= 2:
             try:
                 y_lo_f, y_hi_f = float(bounds[0]), float(bounds[1])
@@ -2144,14 +2566,30 @@ def enrich_rows_column_section_geometry(
             else:
                 med_row = _field_headers_y_median_gap(field_headers)
                 eff_hh_use = min(eff_hh_use, max(1450.0, med_row * 13.5), 4600.0)
+            rdp = r.get("depth_mm")
+            if isinstance(rdp, int) and 180 <= rdp <= 9000:
+                cap_y = max(560.0, min(float(rdp) * 1.22 + 760.0, eff_hh_use, 4200.0))
+                eff_hh_use = min(eff_hh_use, cap_y)
 
         yv_clip: tuple[float, float] | None = None
+        selected_clip_box: tuple[float, float, float, float] | None = None
         if clip_boxes:
+            selected_clip_box = _pick_selection_bbox_for_section(xc, y_anchor, clip_boxes)
             yv_clip = _pick_viewport_y_clip_for_section(xc, y_anchor, clip_boxes)
             cache_key = (
                 *cache_key,
                 (round(yv_clip[0], 1), round(yv_clip[1], 1)),
             )
+            if selected_clip_box is not None:
+                cache_key = (
+                    *cache_key,
+                    (
+                        round(selected_clip_box[0], 1),
+                        round(selected_clip_box[1], 1),
+                        round(selected_clip_box[2], 1),
+                        round(selected_clip_box[3], 1),
+                    ),
+                )
 
         if cache_key not in shapes_by_key:
             bbox_loose = (
@@ -2162,13 +2600,31 @@ def enrich_rows_column_section_geometry(
             )
             if yv_clip is not None:
                 bbox_loose = _clip_bbox_loose_y(bbox_loose, yv_clip[0], yv_clip[1])
-            comb, src = _load_combined_shapes_in_bbox(
-                db,
-                commit_id,
-                bbox_loose,
-                include_block_definitions=include_block_definitions,
-                block_inserts_cached=block_inserts_cached,
-            )
+            comb: list[tuple[str, Any, str | None]] = []
+            src: dict[str, Any] = {}
+            if selected_clip_box is not None:
+                ib = _intersect_bbox(bbox_loose, selected_clip_box)
+                if ib is None:
+                    comb = []
+                    src = {"selection_clip": "no_intersection", "selection_clip_only": True}
+                else:
+                    bbox_loose = ib
+            if not src:
+                comb, src = _load_combined_shapes_in_bbox(
+                    db,
+                    commit_id,
+                    bbox_loose,
+                    include_block_definitions=include_block_definitions,
+                    block_inserts_cached=block_inserts_cached,
+                )
+            if selected_clip_box is not None and comb:
+                comb = _filter_shapes_by_bbox(comb, selected_clip_box)
+            if selected_clip_box is not None:
+                src = {
+                    **(src if isinstance(src, dict) else {}),
+                    "selection_clip_bbox": [round(selected_clip_box[i], 4) for i in range(4)],
+                    "selection_clip_only": True,
+                }
             shapes_by_key[cache_key] = comb
             sources_by_key[cache_key] = src
             bbox_by_key[cache_key] = bbox_loose
@@ -2176,8 +2632,17 @@ def enrich_rows_column_section_geometry(
         loose_shapes = shapes_by_key[cache_key]
         loose_bb = bbox_by_key[cache_key]
 
-        main_txt = str(r.get("MAIN_BAR") or "").strip() or None
+        main_txt = _beam_schedule_main_bar_text_for_section(r)
         n_main_expect, _ = parse_main_bar_spec(main_txt)
+        flat_depth_hint_mm = (
+            _beam_depth_hint_mm_for_flat_row(r)
+            if str(r.get("beam_row_role") or "") == "beam_flat"
+            else None
+        )
+        # flat 보의 CAD 외곽 판정은 beam_flat_try_circle_first_section 내부에서만 수행한다.
+        # 여기서 LINE 조합으로 별도 외곽을 먼저 잡으면 부분 선분(가로 띠)을 단면 bbox로 덮어쓸 수 있다.
+        flat_cad_outline_meta: dict[str, Any] | None = None
+        flat_cad_outline_bb: tuple[float, float, float, float] | None = None
 
         centers_raw, _, _ = _collect_circles_lines_radii(loose_shapes)
         beam_like_section = is_beam_vertical_table_row(r)
@@ -2185,7 +2650,63 @@ def enrich_rows_column_section_geometry(
         # 단면 Y구간 안 원 X 중앙값으로 앵커를 보정하되, Y만 맞고 X는 전부 넣으면 병합 행·인접 열 주근이 섞여
         # 한쪽 단면만 잡히거나 두 스트립이 동일 picked 가 되므로 **이 스트립 xc 근처**만 포함한다.
         xc_cluster = float(xc)
-        if beam_like_section and centers_raw and anchor_y_bounds_arg and len(anchor_y_bounds_arg) >= 2:
+        circle_first_ok = False
+        shapes_for_analysis: list[tuple[str, Any, str | None]] = loose_shapes
+        if str(r.get("beam_row_role") or "") == "beam_flat":
+            from app.services.beam_flat_section_geometry import beam_flat_try_circle_first_section
+
+            row_bbox_for_circle: list[float] | tuple[float, ...] | None = r.get("row_entity_bbox")
+            cad_outline_applied = False
+            if flat_cad_outline_meta and isinstance(flat_cad_outline_meta.get("cad_outline_bbox"), list):
+                try:
+                    row_bbox_for_circle = tuple(float(v) for v in flat_cad_outline_meta["cad_outline_bbox"])
+                    cad_outline_applied = True
+                except (TypeError, ValueError):
+                    pass
+            focus_y = r.get("beam_flat_section_focus_y_bounds")
+            if not cad_outline_applied and isinstance(focus_y, (list, tuple)) and len(focus_y) >= 2:
+                try:
+                    fy0 = float(focus_y[0])
+                    fy1 = float(focus_y[1])
+                    if fy1 > fy0 + 20.0:
+                        if isinstance(row_bbox_for_circle, (list, tuple)) and len(row_bbox_for_circle) >= 4:
+                            rx0 = float(row_bbox_for_circle[0])
+                            rx1 = float(row_bbox_for_circle[2])
+                        else:
+                            rx0 = float(xc) - float(eff_hw_cluster)
+                            rx1 = float(xc) + float(eff_hw_cluster)
+                        row_bbox_for_circle = [rx0, fy0, rx1, fy1]
+                except (TypeError, ValueError):
+                    pass
+
+            _prep = beam_flat_try_circle_first_section(
+                loose_shapes,
+                float(xc),
+                eff_hw_cluster,
+                eff_hh_use,
+                row_bbox_for_circle,
+                n_main_expect,
+                flat_depth_hint_mm,
+                x_excl,
+            )
+            if _prep is not None:
+                centers_raw, cl_meta, tight_bb, shapes_for_analysis, y_anchor, xc_cluster = _prep
+                if flat_cad_outline_meta:
+                    cl_meta = {**cl_meta, **flat_cad_outline_meta}
+                    if flat_cad_outline_bb is not None:
+                        tight_bb = flat_cad_outline_bb
+                        cl_meta["cluster_bbox"] = [
+                            round(flat_cad_outline_bb[i], 4) for i in range(4)
+                        ]
+                        cl_meta["cluster_pick"] = "cad_outline"
+                        shapes_for_analysis = _filter_shapes_by_bbox(
+                            loose_shapes,
+                            _expand_bbox_pad(flat_cad_outline_bb, 24.0),
+                        )
+                anchor_source = "beam_flat_circle_first"
+                circle_first_ok = True
+
+        if not circle_first_ok and beam_like_section and centers_raw and anchor_y_bounds_arg and len(anchor_y_bounds_arg) >= 2:
             try:
                 y_lo_f = float(anchor_y_bounds_arg[0])
                 y_hi_f = float(anchor_y_bounds_arg[1])
@@ -2207,32 +2728,88 @@ def enrich_rows_column_section_geometry(
                         break
                 if len(xs_band) >= 4:
                     xc_cluster = float(_median_float(xs_band))
+                # 가로 flat: 단면은 텍스트 행 Y가 아니라 주근 원 덩어리의 기하 중심을 따른다.
+                if str(r.get("beam_row_role") or "") == "beam_flat" and len(pts_y) >= 4:
+                    strip_gate = max(base_gate * 2.45, 820.0)
+                    pts_strip = [
+                        p
+                        for p in pts_y
+                        if abs(p[0] - float(xc_cluster)) <= strip_gate
+                    ]
+                    if len(pts_strip) >= 4:
+                        y_anchor = float(_median_float([p[1] for p in pts_strip]))
+                        anchor_source = "beam_flat_circle_median_y"
+            except (TypeError, ValueError):
+                pass
+        elif (
+            not circle_first_ok
+            and str(r.get("beam_row_role") or "") == "beam_flat"
+            and centers_raw
+        ):
+            # 행 세로창 메타가 비어 있어도 스트립 X 안의 원 Y 중앙으로 앵커를 맞춘다.
+            try:
+                base_gate = 520.0
+                if x_excl is not None and x_excl > 50.0:
+                    base_gate = max(base_gate, float(x_excl) * 1.22)
+                base_gate = min(max(base_gate, 420.0), 1900.0)
+                pts_all = list(centers_raw)
+                xs_band: list[float] = []
+                for mul in (1.0, 1.32, 1.68, 2.05, 2.45):
+                    gate = base_gate * mul
+                    xs_band = [p[0] for p in pts_all if abs(p[0] - float(xc)) <= gate]
+                    if len(xs_band) >= 8:
+                        break
+                if len(xs_band) >= 4:
+                    xc_cluster = float(_median_float(xs_band))
+                strip_gate = max(base_gate * 2.45, 820.0)
+                pts_strip = [
+                    p
+                    for p in pts_all
+                    if abs(p[0] - float(xc_cluster)) <= strip_gate
+                ]
+                if len(pts_strip) >= 4:
+                    y_anchor = float(_median_float([p[1] for p in pts_strip]))
+                    anchor_source = "beam_flat_circle_median_y_wide"
             except (TypeError, ValueError):
                 pass
 
-        tight_bb, cl_meta = _bbox_from_centerline_cluster(
-            centers_raw,
-            xc_cluster,
-            y_anchor,
-            eff_hw,
-            eff_hh_use,
-            segment_y_span=segment_y_span,
-            strip_x_half_exclusive=x_excl,
-            expected_main_bars=n_main_expect,
-            anchor_y_bounds=anchor_y_bounds_arg,
-            beam_like_section=beam_like_section,
-        )
+        if not circle_first_ok:
+            tight_bb, cl_meta = _bbox_from_centerline_cluster(
+                centers_raw,
+                xc_cluster,
+                y_anchor,
+                eff_hw_cluster,
+                eff_hh_use,
+                segment_y_span=segment_y_span,
+                strip_x_half_exclusive=x_excl,
+                expected_main_bars=n_main_expect,
+                anchor_y_bounds=anchor_y_bounds_arg,
+                beam_like_section=beam_like_section,
+                beam_flat_suppress_full_band_fallback=str(r.get("beam_row_role") or "")
+                == "beam_flat",
+            )
+            if flat_cad_outline_meta:
+                cl_meta = {**cl_meta, **flat_cad_outline_meta}
+                if flat_cad_outline_bb is not None:
+                    tight_bb = flat_cad_outline_bb
+                    cl_meta["cluster_bbox"] = [
+                        round(flat_cad_outline_bb[i], 4) for i in range(4)
+                    ]
+                    cl_meta["cluster_pick"] = "cad_outline"
         if beam_like_section and abs(xc_cluster - xc) > 18.0:
             cl_meta = {
                 **cl_meta,
                 "beam_circle_median_x": round(xc_cluster, 4),
                 "beam_strip_text_mean_x": round(xc, 4),
             }
-        shapes_for_analysis = loose_shapes
+        if not circle_first_ok:
+            shapes_for_analysis = loose_shapes
         # 클러스터 박스로 필터하면 주근이 4개 미만이면 분석은 느슨 bbox 전체를 쓴다.
         # 이때에도 search_bbox 를 좁은 tight_bb 로 두면 뷰어·오버레이만 일부로 보인다(치수선 등 노이즈 클러스터).
         display_cluster_bb = tight_bb
-        if tight_bb is not None:
+        if str(r.get("beam_row_role") or "") == "beam_flat" and flat_cad_outline_bb is not None:
+            display_cluster_bb = flat_cad_outline_bb
+        if not circle_first_ok and tight_bb is not None:
             filt = _filter_shapes_by_bbox(loose_shapes, tight_bb)
             cc2, _, _ = _collect_circles_lines_radii(filt)
             if len(cc2) >= 4:
@@ -2247,7 +2824,34 @@ def enrich_rows_column_section_geometry(
             shape_sources=sources_by_key.get(cache_key),
             beam_stem_outline=use_beam_stem,
         )
+        if (
+            str(r.get("beam_row_role") or "") == "beam_flat"
+            and isinstance(cl_meta, dict)
+            and cl_meta.get("mode") == "beam_flat_cad_outline_first"
+            and isinstance(cl_meta.get("cluster_bbox"), list)
+            and len(cl_meta["cluster_bbox"]) == 4
+        ):
+            # flat CAD-first에서는 단면 후보 박스의 근거가 CAD 외곽이다.
+            # 내부 MainBar 원들이 가로띠 객체와 같은 레이어/타입이면 bar_cluster_bbox가 오해를 만든다.
+            raw_bar_bbox = geo.pop("bar_cluster_bbox", None)
+            if raw_bar_bbox is not None:
+                geo["bar_cluster_bbox_raw_from_all_mainbar_circles"] = raw_bar_bbox
+            try:
+                outline_bb_for_display = [round(float(cl_meta["cluster_bbox"][i]), 4) for i in range(4)]
+                geo["bar_cluster_bbox"] = outline_bb_for_display
+                geo["bar_cluster_bbox_display_mode"] = "cad_outline_not_rebar_cluster"
+                geo["beam_flat_cad_outline_cluster_only"] = True
+            except (TypeError, ValueError):
+                pass
         geo["section_y_anchor_source"] = anchor_source
+        if str(r.get("beam_row_role") or "") == "beam_flat":
+            geo["beam_flat_geometry_branch"] = (
+                "circle_first_v1" if circle_first_ok else "text_cluster_fallback"
+            )
+            try:
+                geo["section_anchor_y_geometry"] = round(float(y_anchor), 4)
+            except (TypeError, ValueError):
+                geo["section_anchor_y_geometry"] = None
         if rda is not None:
             try:
                 geo["row_data_anchor_y"] = round(float(rda), 4)
@@ -2258,6 +2862,9 @@ def enrich_rows_column_section_geometry(
         geo["loose_shape_count"] = len(loose_shapes)
         geo["centers_raw_count"] = len(centers_raw)
         geo["shapes_for_analysis_count"] = len(shapes_for_analysis)
+        # 느슨 DB 조회창에서 CIRCLE/LWPOLY 등으로 잡힌 원 후보(분석 전). debug_circle_count_raw 는 analyze 입력 도형 기준이라
+        # 클러스터 필터로 줄기 전·후와 숫자가 달라질 수 있음 → 뷰어 디버그에서 혼동 방지.
+        geo["debug_circle_count_loose"] = int(len(centers_raw))
         geo["search_bbox_loose"] = [round(loose_bb[i], 4) for i in range(4)]
         # 표시용 search_bbox: DB 조회 창(느슨)을 쓰면 세로로 비정상적으로 길게 그려짐.
         # 클러스터가 잡혔으면 그 박스(단, 필터 폐기 시에는 tight 를 쓰지 않음) → 주근 헐·느슨 창.
@@ -2337,6 +2944,64 @@ def enrich_rows_column_section_geometry(
         geo["cluster_geometry"] = cl_meta
         if isinstance(cl_meta, dict) and cl_meta.get("reason"):
             geo["cluster_fail_reason"] = cl_meta["reason"]
+        if flat_depth_hint_mm is not None:
+            geo["flat_depth_hint_mm"] = int(flat_depth_hint_mm)
+        # flat 보 안전장치: 단면으로 인정된 원군 bbox가 지나치게 납작하면(텍스트 가로띠 오탐)
+        # 결과를 실패 처리해 잘못된 빨간 클러스터 확정을 막는다.
+        if (
+            str(r.get("beam_row_role") or "") == "beam_flat"
+            and geo.get("ok")
+            and isinstance(geo.get("bar_cluster_bbox"), list)
+            and len(geo["bar_cluster_bbox"]) == 4
+        ):
+            try:
+                by0 = float(geo["bar_cluster_bbox"][1])
+                by1 = float(geo["bar_cluster_bbox"][3])
+                bx0 = float(geo["bar_cluster_bbox"][0])
+                bx1 = float(geo["bar_cluster_bbox"][2])
+                span_y = abs(by1 - by0)
+                span_x = abs(bx1 - bx0)
+                aspect_xy = span_x / max(span_y, 1.0)
+                reject = False
+                # depth 힌트가 있으면 기존 규칙 유지
+                min_ok_span_y = 0.0
+                if flat_depth_hint_mm is not None:
+                    d_mm = float(flat_depth_hint_mm)
+                    min_ok_span_y = max(54.0, d_mm * 0.16)
+                    if span_y < min_ok_span_y:
+                        reject = True
+                # depth 힌트가 없어도 flat에서 과도한 수평 띠형은 절대 차단
+                if span_y < 86.0 and aspect_xy >= 4.2:
+                    reject = True
+                if reject:
+                    geo["ok"] = False
+                    geo["reason"] = "flat_horizontal_band_rejected"
+                    if min_ok_span_y > 0.0:
+                        geo["beam_flat_min_ok_span_y"] = round(min_ok_span_y, 4)
+                    geo["beam_flat_bar_cluster_span_y"] = round(span_y, 4)
+                    geo["beam_flat_bar_cluster_span_x"] = round(span_x, 4)
+                    geo["beam_flat_bar_cluster_aspect_xy"] = round(aspect_xy, 4)
+                    # 거부된 수평 원군 bbox는 디버그 표시에서도 제거한다.
+                    bad_bar_bbox = geo.pop("bar_cluster_bbox", None)
+                    geo["rejected_bar_cluster_bbox"] = bad_bar_bbox
+                    outline_meta = geo.get("section_outline_meta")
+                    outline_bb = None
+                    if isinstance(outline_meta, dict):
+                        pbb = outline_meta.get("picked_bbox")
+                        if isinstance(pbb, list) and len(pbb) == 4:
+                            try:
+                                outline_bb = [round(float(pbb[i]), 4) for i in range(4)]
+                            except (TypeError, ValueError):
+                                outline_bb = None
+                    if outline_bb is not None:
+                        geo["search_bbox"] = outline_bb
+                        geo["search_bbox_display_mode"] = "section_outline_after_horizontal_reject"
+                        if isinstance(cl_meta, dict):
+                            cl_meta["cluster_bbox"] = outline_bb
+                            cl_meta["cluster_pick"] = "section_outline_after_horizontal_reject"
+                            cl_meta["rejected_horizontal_bar_bbox"] = bad_bar_bbox
+            except (TypeError, ValueError):
+                pass
         geo["search_half_width"] = round(eff_hw, 4)
         geo["search_half_width_load"] = round(hw_load, 4)
         geo["search_half_height"] = round(eff_hh_use, 4)

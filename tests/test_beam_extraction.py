@@ -1,6 +1,12 @@
 """보 일람 추출 단위 테스트 (DB 없음)."""
 
+from app.services.beam_flat_spatial import (
+    beam_flat_row_has_beam_mark,
+    beam_flat_x_slabs,
+    is_flat_zone_anchor_text,
+)
 from app.services.beam_extraction import (
+    _beam_flat_section_focus_y_bounds,
     _beam_vertical_template_section_y_for_strip,
     _beam_vertical_cluster_mark_tuples_by_y_then_x,
     _beam_vertical_infer_strip_member_map,
@@ -11,6 +17,7 @@ from app.services.beam_extraction import (
     _beam_vertical_row_section_anchor_y,
     _beam_vertical_section_geom_y_bounds,
     _beam_vertical_merge_identity,
+    _beam_vertical_prepare_bands_for_template_map,
     _beam_vertical_split_pending_by_member_mark,
     _is_standalone_section_mm_label,
     _prune_beam_vertical_template,
@@ -25,11 +32,105 @@ from app.services.beam_extraction import (
     extract_beam_vertical_blocks,
     process_beam_extraction,
 )
-from app.services.schedule_extraction import ExtractionConfig
+from app.services.schedule_extraction import ExtractionConfig, _map_data_bands_to_template
 
 
 def _row(items: list[tuple[float, float, str]]) -> list[dict]:
     return [{"x": x, "y": y, "text": t, "layer": "0", "id": 0, "entity_type": "TEXT"} for x, y, t in items]
+
+
+def test_beam_flat_section_focus_y_bounds_between_zone_and_bar():
+    """부위(INT)와 주근 줄이 Y로 벌어지면 단면용 세로창 후보를 그 사이로 잡는다."""
+    row = _row(
+        [
+            (0, 1000, "RG11"),
+            (200, 1100, "INT"),
+            (400, 1120, "900"),
+            (200, 2600, "28-UHD19"),
+        ]
+    )
+    bb = _beam_flat_section_focus_y_bounds(row)
+    assert bb is not None
+    lo, hi = bb
+    assert lo < hi
+    assert hi - lo >= 200.0
+
+
+def test_beam_flat_section_focus_y_bounds_same_line_skipped():
+    """부위·철근이 같은 Y띠면 후보를 만들지 않는다(행 전체 bbox 유지)."""
+    row = _row(
+        [
+            (0, 1000, "RG11"),
+            (200, 1000, "INT"),
+            (400, 1000, "28-UHD19"),
+        ]
+    )
+    assert _beam_flat_section_focus_y_bounds(row) is None
+
+
+def test_beam_flat_x_slabs_splits_by_zone_anchors():
+    """부위명(INT·CENTER 등) X를 기준으로 인접 중점에서 열(슬랩)으로 나눈다."""
+    row = _row(
+        [
+            (1000, 5000, "INT"),
+            (2000, 5000, "28-UHD19"),
+            (6000, 5000, "CENTER"),
+            (7000, 5000, "4-UHD19"),
+        ]
+    )
+    slabs = beam_flat_x_slabs(row)
+    assert len(slabs) == 2
+    assert len(slabs[0]) == 2
+    assert len(slabs[1]) == 2
+
+
+def test_beam_flat_row_has_beam_mark():
+    """무부호(주근 줄만)는 부호가 없으면 단면 파이프라인에서 제외한다."""
+    row_mark = _row([(1000, 5000, "RG11 (1000x900)")])
+    row_mark[0]["mark"] = "RG11 (1000x900)"
+    assert beam_flat_row_has_beam_mark({"_flat_sorted_entities": row_mark, "mark": "RG11 (1000x900)"})
+    row_plain = _row([(2000, 5000, "28-UHD19"), (3000, 5000, "INT")])
+    assert not beam_flat_row_has_beam_mark({"_flat_sorted_entities": row_plain, "mark": ""})
+
+
+def test_flat_zone_anchor_accepts_parenthetical_qualifiers():
+    """도면에 흔한 'END (INT)', 'INT (BOTH)' 형태도 부위 앵커로 인식한다."""
+    assert is_flat_zone_anchor_text("END (INT)")
+    assert is_flat_zone_anchor_text("INT (BOTH)")
+    assert is_flat_zone_anchor_text("  CENTER  ")
+    row = _row(
+        [
+            (1000, 5000, "INT (BOTH)"),
+            (2000, 5000, "28-UHD19"),
+            (6000, 5000, "END (INT)"),
+            (7000, 5000, "4-UHD19"),
+        ]
+    )
+    assert len(beam_flat_x_slabs(row)) == 2
+
+
+def test_beam_flat_x_slabs_single_without_two_zones():
+    """부위 앵커가 2개 미만이면 한 슬랩."""
+    row = _row([(1000, 5000, "INT"), (2000, 5000, "28-UHD19")])
+    assert len(beam_flat_x_slabs(row)) == 1
+
+
+def test_beam_vertical_prepare_bands_sorts_by_section_y_keeps_all_text():
+    """스트립→템플릿 매핑 전: 텍스트는 유지하고 단면(형태) Y에 가까운 순으로만 정렬한다."""
+    band_tol = 6.0
+    template: list[tuple[float, str, str]] = []
+    y = 1000.0
+    for i in range(17):
+        lab = "부 호" if i == 0 else ("형 태" if i == 3 else ("상 부 근" if i == 8 else f"r{i}"))
+        template.append((y, lab, f"k{i}"))
+        y -= 50.0
+    bands = [(980.0, "RG11"), (975.0, "END(INT)"), (720.0, "26-UHD19")]
+    pre = _beam_vertical_prepare_bands_for_template_map(bands, template)
+    ts = {t for _y, t in pre}
+    assert ts == {"RG11", "END(INT)", "26-UHD19"}
+    assert pre[0][0] == 975.0
+    dyn = _map_data_bands_to_template(pre, template, band_tol, beam_vertical_schedule=True)
+    assert any("26-UHD19" in str(v) for v in dyn.values())
 
 
 def test_prune_beam_vertical_template_strips_mm_only_rows():
@@ -100,11 +201,115 @@ def test_beam_wide_table_sample():
     assert len(rows) == 1
     r = rows[0]
     assert r["mark"] == "G21"
+    assert r.get("beam_cluster_row_index") == 1
     assert r["width_mm"] == 500
     assert r["depth_mm"] == 600
     assert "7/7-D16" in r["int_top_bar"]
     assert r["cen_top_bar"] == "3-D16"
     assert "2-D10@100" in r["ext_stirrup_bar"]
+    ml = meta.get("beam_vertical_member_zone_match_lines") or []
+    assert len(ml) == 1
+    assert ml[0].get("mark") == "G21"
+    assert len(ml[0].get("points") or []) == 3
+
+
+def test_process_beam_auto_prefers_horizontal_cluster_bundle():
+    """process_beam: 가로 Y묶음 표 인식이 행 묶음 번들보다 우선."""
+    y0 = 1000.0
+    y1 = 820.0
+    header = _row(
+        [
+            (0, y0, "Name"),
+            (80, y0, "Type"),
+            (160, y0, "Material"),
+            (240, y0, "Width"),
+            (320, y0, "Depth"),
+            (400, y0, "Int- TopBar"),
+            (500, y0, "Cen- TopBar"),
+            (600, y0, "Ext- TopBar"),
+            (700, y0, "Int- BotBar"),
+            (800, y0, "Cen- BotBar"),
+            (900, y0, "Ext- BotBar"),
+            (1000, y0, "Int- StirrupBar"),
+            (1120, y0, "Cen- StirrupBar"),
+            (1240, y0, "Ext- StirrupBar"),
+            (1360, y0, "Side Bar"),
+        ]
+    )
+    data = _row(
+        [
+            (0, y1, "G21"),
+            (80, y1, "RC"),
+            (160, y1, "By Story"),
+            (240, y1, "500"),
+            (320, y1, "600"),
+            (400, y1, "7/7-D16"),
+            (500, y1, "3-D16"),
+            (600, y1, "7/7-D16"),
+            (700, y1, "5-D16"),
+            (800, y1, "7/6-D16"),
+            (900, y1, "5-D16"),
+            (1000, y1, "2-D10@100"),
+            (1120, y1, "2-D10@150"),
+            (1240, y1, "2-D10@100"),
+            (1360, y1, "0-D10"),
+        ]
+    )
+    items = header + data
+    cfg = ExtractionConfig(
+        beam_layout="auto",
+        y_tolerance=50.0,
+        beam_row_merge_y_max=4.0,
+        beam_row_bridge_passes=1,
+    )
+    rows, v = process_beam_extraction(cfg, items)
+    assert v.get("beam_layout_resolved") == "horizontal_wide"
+    assert v.get("beam_wide_or_tree")
+    assert not v.get("beam_vertical_blocks")
+    assert not v.get("beam_row_cluster_bundle")
+    assert len(rows) == 1 and rows[0].get("mark") == "G21"
+    wst = v.get("beam_vertical_strips") or []
+    assert len(wst) >= 1 and float(wst[0].get("x_center") or 0) > 0
+    assert v.get("beam_vertical_field_headers")
+
+
+def test_process_beam_row_cluster_bundle_no_vertical_strip():
+    """헤더 없는 세로형 텍스트도 가로 Y행만으로 row_cluster_bundle 처리(세로 스트립 미사용)."""
+    # Y 간격을 merge/bridge 한도보다 크게 두어 한 묶음으로 합쳐지지 않게 함
+    y_name, y_w, y_top = 3000.0, 2910.0, 2820.0
+    labels = _row(
+        [
+            (10, y_name, "Name"),
+            (10, y_w, "Width"),
+            (10, y_top, "Int. TopBar"),
+        ]
+    )
+    data = _row(
+        [
+            (200, y_name, "BX1"),
+            (200, y_w, "400"),
+            (200, y_top, "5-D22"),
+        ]
+    )
+    items = labels + data
+    cfg = ExtractionConfig(
+        beam_layout="auto",
+        column_band_y_tol=6.0,
+        y_tolerance=5.0,
+        beam_row_merge_y_max=12.0,
+        beam_row_bridge_passes=1,
+    )
+    rows, v = process_beam_extraction(cfg, items)
+    assert v.get("beam_layout_resolved") == "row_cluster_bundle"
+    assert v.get("beam_row_cluster_bundle")
+    assert not v.get("beam_vertical_blocks")
+    assert rows and (rows[0].get("mark") == "BX1" or rows[0].get("name") == "BX1")
+    # 단면 enrich용 합성 스트립·헤더(이전에는 빈 배열이라 section_geometry 스킵됨)
+    strips = v.get("beam_vertical_strips") or []
+    headers = v.get("beam_vertical_field_headers") or []
+    assert len(strips) >= 1 and float(strips[0].get("x_center") or 0) > 0
+    assert headers
+    assert rows[0].get("beam_vertical_merged_strip_indices") == [0]
 
 
 def test_beam_location_tree_grouped():
@@ -159,6 +364,9 @@ def test_beam_location_tree_grouped():
     assert by["RG11"]["cen_top_bar"] == "2-D16"
     assert by["RG11"]["building"] == "A동"
     assert by["RG12"]["int_top_bar"] == "6-D16" and by["RG12"]["cen_top_bar"] == "6-D16"
+    strips = meta.get("beam_vertical_strips") or []
+    assert len(strips) == 2 and all(float(s.get("x_center") or 0) > 0 for s in strips)
+    assert meta.get("beam_vertical_field_headers")
 
 
 def test_process_beam_auto_flat_when_no_header():

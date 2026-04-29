@@ -1,17 +1,36 @@
 """column_section_geometry: 스트립 X 전용 폭 등 순수 함수."""
 from unittest.mock import MagicMock, patch
 
-from shapely.geometry import LineString
+from shapely.geometry import LineString, Point
 
+from app.services.beam_flat_section_geometry import beam_flat_try_circle_first_section
 from app.services.column_section_geometry import (
+    _beam_depth_hint_mm_for_flat_row,
     _bbox_from_centerline_cluster,
     _clip_bbox_loose_y,
     _exclusive_strip_x_half_width,
     _infer_section_dimension_bh_mm,
     _merge_beam_vertical_twin_rebar_clusters,
     _pick_viewport_y_clip_for_section,
+    _collect_circles_lines_radii,
     enrich_rows_beam_vertical_section_geometry_zones,
 )
+
+
+def test_collect_circles_lines_radii_includes_small_hatch_polygon():
+    """HATCH 등 작은 면(원형 채움)을 주근 후보 점으로 집계한다."""
+    circ = Point(500.0, 800.0).buffer(14.0, quad_segs=12)
+    centers, radii, lines = _collect_circles_lines_radii([("HATCH", circ, "0")])
+    assert len(centers) == 1
+    assert abs(centers[0][0] - 500.0) < 2.0
+    assert abs(centers[0][1] - 800.0) < 2.0
+    assert len(radii) == 1 and radii[0] > 5.0
+    assert lines == []
+
+
+def test_beam_depth_hint_mm_for_flat_row_from_mark_parens():
+    row = {"mark": "RG11 (1000x900)", "depth_mm": None}
+    assert _beam_depth_hint_mm_for_flat_row(row) == 900
 
 
 def test_exclusive_strip_x_half_width_narrow_slot():
@@ -83,6 +102,100 @@ def test_beam_like_bbox_cluster_spans_top_and_bottom_rebar():
     assert bb is not None
     assert meta.get("beam_twin_rebar_cluster_merge") is True
     assert bb[3] - bb[1] > 280.0
+
+
+def test_beam_flat_circle_first_prefers_circle_block_over_horizontal_band():
+    """
+    flat 보 단면: 같은 X띠에 원이 많더라도 가로 1줄 띠보다
+    원 주변 LINE/LWPOLY가 붙은 2단(상·하) 원 블록을 우선한다.
+    """
+    circles_strip = [(-360.0 + 65.0 * i, 1000.0) for i in range(12)]
+    circles_section = [(-120.0 + 80.0 * i, 740.0) for i in range(4)] + [
+        (-120.0 + 80.0 * i, 860.0) for i in range(4)
+    ]
+    shapes: list[tuple[str, object, str | None]] = []
+    for x, y in circles_strip + circles_section:
+        shapes.append(("HATCH", Point(x, y).buffer(14.0, quad_segs=12), "REBAR"))
+    # 단면 블록 주변 기하(외곽/내부 스템) 추가
+    shapes.extend(
+        [
+            ("LINE", LineString([(-220.0, 670.0), (220.0, 670.0)]), "SEC"),
+            ("LINE", LineString([(-220.0, 930.0), (220.0, 930.0)]), "SEC"),
+            ("LINE", LineString([(-220.0, 670.0), (-220.0, 930.0)]), "SEC"),
+            ("LINE", LineString([(220.0, 670.0), (220.0, 930.0)]), "SEC"),
+            ("LINE", LineString([(-40.0, 670.0), (-40.0, 930.0)]), "SEC"),
+            ("LINE", LineString([(40.0, 670.0), (40.0, 930.0)]), "SEC"),
+        ]
+    )
+
+    out = beam_flat_try_circle_first_section(
+        shapes,
+        strip_xc=0.0,
+        loose_hw=1600.0,
+        loose_hh=1600.0,
+        row_entity_bbox=[-260.0, 650.0, 260.0, 910.0],
+        expected_main_bars=8,
+        expected_depth_mm=900,
+        strip_x_half_exclusive=900.0,
+    )
+    assert out is not None
+    _centers_raw, meta, _tight, _shapes_for_analysis, y_anchor, _xc_cluster = out
+    assert meta.get("cluster_size") == 8
+    # 오탐 가로띠(y=1000)가 아닌 단면 원 블록 중심(약 800)을 고른다.
+    assert 760.0 <= y_anchor <= 900.0
+
+
+def test_beam_flat_circle_first_uses_cad_outline_internal_circles():
+    """CAD 닫힌 외곽이 있으면 외곽 내부 원만으로 flat 단면 클러스터를 만든다."""
+    shapes: list[tuple[str, object, str | None]] = []
+    # 외부 가로띠 원: 개수가 많아도 단면 외곽 밖이면 제외되어야 한다.
+    for i in range(12):
+        shapes.append(("HATCH", Point(-360.0 + 65.0 * i, 1000.0).buffer(14.0, quad_segs=12), "REBAR"))
+    # 실제 단면 내부 원
+    for x, y in [(-120, 740), (-40, 740), (40, 740), (120, 740), (-120, 860), (-40, 860), (40, 860), (120, 860)]:
+        shapes.append(("HATCH", Point(float(x), float(y)).buffer(14.0, quad_segs=12), "REBAR"))
+    shapes.append(
+        (
+            "LWPOLYLINE",
+            LineString([(-220.0, 650.0), (220.0, 650.0), (220.0, 930.0), (-220.0, 930.0), (-220.0, 650.0)]),
+            "SEC",
+        )
+    )
+
+    out = beam_flat_try_circle_first_section(
+        shapes,
+        strip_xc=0.0,
+        loose_hw=1600.0,
+        loose_hh=1600.0,
+        row_entity_bbox=[-260.0, 650.0, 260.0, 930.0],
+        expected_main_bars=8,
+        expected_depth_mm=900,
+        strip_x_half_exclusive=900.0,
+    )
+
+    assert out is not None
+    _centers_raw, meta, _tight, _shapes_for_analysis, y_anchor, _xc_cluster = out
+    assert meta.get("cad_outline_circle_filter") is True
+    assert meta.get("cluster_pick") == "cad_outline_internal_circles"
+    assert meta.get("cluster_size") == 8
+    assert 760.0 <= y_anchor <= 840.0
+
+
+def test_beam_flat_circle_first_rejects_horizontal_only_candidates():
+    """depth 대비 너무 납작한 수평 원줄만 있으면 circle-first를 중단한다."""
+    circles_strip = [(-360.0 + 65.0 * i, 1000.0) for i in range(12)]
+    shapes: list[tuple[str, object, str | None]] = [("POINT", Point(x, y), "REBAR") for x, y in circles_strip]
+    out = beam_flat_try_circle_first_section(
+        shapes,
+        strip_xc=0.0,
+        loose_hw=1600.0,
+        loose_hh=1600.0,
+        row_entity_bbox=[-260.0, 900.0, 260.0, 1110.0],
+        expected_main_bars=8,
+        expected_depth_mm=900,
+        strip_x_half_exclusive=900.0,
+    )
+    assert out is None
 
 
 def test_centerline_cluster_row_y_bounds_excludes_adjacent_floor():

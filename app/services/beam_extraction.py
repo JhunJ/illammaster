@@ -1,5 +1,6 @@
 """
-보(RC beam) 일람 추출: 가로 와이드 표, Location 트리(좁은 표), 세로 블록(기둥과 동일 기하).
+보(RC beam) 일람 추출: Y행 클러스터(가로 띠)에서 와이드·Location 표를 우선 읽고,
+실패 시에만 세로 블록(좌측 라벨+우측 스트립)으로 폴백한다.
 """
 from __future__ import annotations
 
@@ -12,9 +13,12 @@ from app.services.column_section_geometry import (
     _field_headers_y_median_gap,
     header_row_is_section_geometry_anchor,
 )
+from app.services.beam_flat_spatial import RE_FLAT_BEAM_MARK, beam_flat_section_focus_y_bounds
+
 from app.services.schedule_extraction import (
     CATEGORY_BEAM,
     ExtractionConfig,
+    beam_row_clusters_for_validation,
     _cluster_items_by_x_gap,
     _demote_beam_zone_column_headers_from_labels,
     _demote_misassigned_label_entities,
@@ -25,14 +29,20 @@ from app.services.schedule_extraction import (
     _merge_strip_into_y_bands,
     _merge_signals,
     _partition_data_items_into_member_strips,
+    _pick_template_segment_for_y,
     _row_data_anchor_y_from_strip_relaxed,
     _segment_template_rows,
     _segment_y_bounds_world,
+    _template_segment_y_intervals,
     _slug_field_key,
     _split_column_label_and_data,
     _split_dyn_by_template_segments,
     cluster_rows,
+    bridge_beam_sparse_row_clusters,
+    merge_beam_sparse_row_clusters,
     parse_text_signals,
+    _row_has_beam_mark_like,
+    _row_is_beam_header_like,
 )
 
 # --- 헤더 → 내부 키 (JSON/엑셀 공통) ---
@@ -304,6 +314,7 @@ def _beam_row_to_record_wide(
     wall_mode: str,
     building: str | None,
     row_y_mean: float | None,
+    cluster_row_index: int | None = None,
 ) -> dict[str, Any] | None:
     n = min(len(col_keys), len(cells))
     rec: dict[str, Any] = {
@@ -358,7 +369,200 @@ def _beam_row_to_record_wide(
     rec["cells"] = flat
     if row_y_mean is not None:
         rec["row_y_mean"] = round(float(row_y_mean), 4)
+    if cluster_row_index is not None:
+        rec["beam_cluster_row_index"] = int(cluster_row_index)
     return rec
+
+
+def _beam_horizontal_wide_match_lines(
+    rows_cluster: list[list[dict[str, Any]]],
+    col_keys: list[str | None],
+    records: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    """
+    가로 와이드( Y행 클러스터 + 열 헤더 ) 성공 시 뷰어 폴리라인.
+    한 행 안에서 X순 열 인덱스 = col_keys 인덱스와 같다고 보고 부호→부위(또는 첫 주근 열)→단면(폭·고) TEXT 좌표를 잇는다.
+    """
+    out: list[dict[str, Any]] = []
+    zone_priority = (
+        "location",
+        "int_top_bar",
+        "cen_top_bar",
+        "ext_top_bar",
+        "int_bot_bar",
+        "cen_bot_bar",
+        "ext_bot_bar",
+        "int_stirrup_bar",
+        "cen_stirrup_bar",
+        "ext_stirrup_bar",
+    )
+    for si, rec in enumerate(records):
+        ri = rec.get("beam_cluster_row_index")
+        if not isinstance(ri, int) or ri < 0 or ri >= len(rows_cluster):
+            continue
+        mk = str(rec.get("mark") or rec.get("name") or "").strip()
+        if not mk:
+            continue
+        row_sorted = sorted(rows_cluster[ri], key=lambda r: float(r["x"]))
+        n = min(len(col_keys), len(row_sorted))
+        if n < 1:
+            continue
+        j_name = next((j for j in range(n) if col_keys[j] == "name"), -1)
+        if j_name < 0:
+            continue
+        jw = next((j for j in range(n) if col_keys[j] == "width_mm"), -1)
+        jd = next((j for j in range(n) if col_keys[j] == "depth_mm"), -1)
+        cells = [str(row_sorted[k].get("text") or "").strip() for k in range(len(row_sorted))]
+
+        j_zone = -1
+        for pk in zone_priority:
+            j_cand = next((j for j in range(n) if col_keys[j] == pk), -1)
+            if j_cand < 0:
+                continue
+            if j_cand < len(cells) and cells[j_cand].strip():
+                j_zone = j_cand
+                break
+        if j_zone < 0:
+            if jd >= 0 and j_name >= 0:
+                j_zone = max(0, min((j_name + jd) // 2, n - 1))
+            else:
+                j_zone = j_name
+
+        def _xy(j: int) -> tuple[float, float] | None:
+            if j < 0 or j >= len(row_sorted):
+                return None
+            it = row_sorted[j]
+            try:
+                return float(it["x"]), float(it["y"])
+            except (TypeError, KeyError, ValueError):
+                return None
+
+        p0 = _xy(j_name)
+        p1 = _xy(j_zone)
+        p2: tuple[float, float] | None = None
+        if jw >= 0 and jd >= 0:
+            try:
+                x2 = 0.5 * (float(row_sorted[jw]["x"]) + float(row_sorted[jd]["x"]))
+                y2 = 0.5 * (float(row_sorted[jw]["y"]) + float(row_sorted[jd]["y"]))
+                p2 = (x2, y2)
+            except (TypeError, KeyError, ValueError):
+                p2 = None
+        elif jd >= 0:
+            p2 = _xy(jd)
+        elif jw >= 0:
+            p2 = _xy(jw)
+        if not p0 or not p1 or not p2:
+            continue
+        zt = cells[j_zone][:48] if 0 <= j_zone < len(cells) else ""
+        pts = [
+            [round(p0[0], 4), round(p0[1], 4)],
+            [round(p1[0], 4), round(p1[1], 4)],
+            [round(p2[0], 4), round(p2[1], 4)],
+        ]
+        out.append(
+            {
+                "strip_index": si,
+                "mark": mk,
+                "mark_inferred": mk,
+                "zone_text": (zt or "—").strip(),
+                "points": pts,
+            }
+        )
+    return out
+
+
+def _beam_row_entities_y_bounds(row: list[dict[str, Any]]) -> tuple[float, float] | None:
+    ys: list[float] = []
+    for it in row or []:
+        try:
+            ys.append(float(it["y"]))
+        except (TypeError, KeyError, ValueError):
+            continue
+    if not ys:
+        return None
+    return (min(ys), max(ys))
+
+
+def _beam_horizontal_or_tree_synth_strips_and_headers(
+    rows_out: list[dict[str, Any]],
+    match_lines: list[dict[str, Any]] | None,
+    rows_cluster: list[list[dict[str, Any]]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    가로 와이드·Location 트리는 세로 블록용 strip/헤더가 없어 단면 enrich·뷰어 poly 내비가 빈다.
+    출력 행 인덱스 = 스트립 인덱스(와이드 match_line.strip_index 와 동일)로 합성한다.
+    """
+    if not rows_out:
+        return [], []
+    xc_by_si: dict[int, float] = {}
+    for line in match_lines or []:
+        try:
+            si = int(line.get("strip_index"))
+        except (TypeError, ValueError):
+            continue
+        pts = line.get("points")
+        if not isinstance(pts, list) or not pts:
+            continue
+        xs: list[float] = []
+        for p in pts[:4]:
+            if isinstance(p, (list, tuple)) and len(p) >= 1:
+                try:
+                    xs.append(float(p[0]))
+                except (TypeError, ValueError):
+                    pass
+        if xs:
+            xc_by_si[si] = sum(xs) / len(xs)
+    strip_infos: list[dict[str, Any]] = []
+    for si, rec in enumerate(rows_out):
+        xc = float(xc_by_si.get(si) or 0.0)
+        if xc == 0.0:
+            cxy = None
+            cri = rec.get("beam_cluster_row_index")
+            if isinstance(cri, int) and 0 <= cri < len(rows_cluster):
+                cxy = _beam_centroid_entities(rows_cluster[cri])
+            if cxy is None:
+                idxs = rec.get("_beam_loc_flush_row_indices")
+                if isinstance(idxs, list):
+                    ents: list[dict[str, Any]] = []
+                    for ri in idxs:
+                        if isinstance(ri, int) and 0 <= ri < len(rows_cluster):
+                            ents.extend(rows_cluster[ri] or [])
+                    cxy = _beam_centroid_entities(ents)
+            if cxy:
+                xc = float(cxy[0])
+        strip_infos.append({"index": si, "x_center": round(xc, 4), "entity_count": 0})
+        rec.setdefault("beam_vertical_merged_strip_indices", [si])
+        yb = None
+        cri2 = rec.get("beam_cluster_row_index")
+        if isinstance(cri2, int) and 0 <= cri2 < len(rows_cluster):
+            yb = _beam_row_entities_y_bounds(rows_cluster[cri2])
+        if yb is None:
+            idxs2 = rec.get("_beam_loc_flush_row_indices")
+            if isinstance(idxs2, list):
+                ys_acc: list[float] = []
+                for ri in idxs2:
+                    if not isinstance(ri, int) or ri < 0 or ri >= len(rows_cluster):
+                        continue
+                    yp = _beam_row_entities_y_bounds(rows_cluster[ri])
+                    if yp:
+                        ys_acc.extend([yp[0], yp[1]])
+                if len(ys_acc) >= 2:
+                    yb = (min(ys_acc), max(ys_acc))
+        if yb is not None:
+            rec.setdefault("row_data_anchor_y_bounds", [round(float(yb[0]), 4), round(float(yb[1]), 4)])
+    ys_mean: list[float] = []
+    for r in rows_out:
+        ry = r.get("row_y_mean")
+        if ry is not None:
+            try:
+                ys_mean.append(float(ry))
+            except (TypeError, ValueError):
+                pass
+    y_tmpl = (max(ys_mean) + 280.0) if ys_mean else 0.0
+    field_headers = [
+        {"key": "section_shape", "label": "형 태", "y": round(float(y_tmpl), 4)},
+    ]
+    return field_headers, strip_infos
 
 
 _LOC_ZONE = {
@@ -464,17 +668,22 @@ def _extract_beam_location_grouped(
     cur_name: str | None = None
     cur: dict[str, Any] = {}
     cur_y: list[float] = []
+    cur_ri: list[int] = []
 
     def flush():
-        nonlocal cur, cur_name, cur_y
+        nonlocal cur, cur_name, cur_y, cur_ri
         if cur_name and any(
             cur.get(k) for k in BEAM_WIDE_KEYS_ORDER if k not in ("name", "type", "material")
         ):
             ym = sum(cur_y) / len(cur_y) if cur_y else None
-            out.append(_finalize_grouped_beam(cur, wall_mode=wall_mode, building=building, row_y_mean=ym))
+            rec = _finalize_grouped_beam(cur, wall_mode=wall_mode, building=building, row_y_mean=ym)
+            if cur_ri:
+                rec["_beam_loc_flush_row_indices"] = list(cur_ri)
+            out.append(rec)
         cur = {}
         cur_name = None
         cur_y = []
+        cur_ri = []
 
     for i in range(header_idx + 1, len(cell_rows)):
         cells = cell_rows[i]
@@ -523,7 +732,6 @@ def _extract_beam_location_grouped(
             if sb:
                 cur[f"{z}_stirrup_bar"] = sb
 
-        cur_y.append(row_y_means[i] if i < len(row_y_means) else row_y_means[-1])
         if zone == "_both":
             assign("int")
             assign("ext")
@@ -533,6 +741,8 @@ def _extract_beam_location_grouped(
             assign("ext")
         elif zone in ("int", "cen", "ext"):
             assign(zone)
+        cur_y.append(row_y_means[i] if i < len(row_y_means) else row_y_means[-1])
+        cur_ri.append(i)
     flush()
     return out
 
@@ -569,6 +779,7 @@ def extract_beam_horizontal_from_clusters(
                 wall_mode=wall_mode,
                 building=building,
                 row_y_mean=row_y_means[i] if i < len(row_y_means) else None,
+                cluster_row_index=i,
             )
             if rec:
                 rows_out.append(rec)
@@ -578,6 +789,15 @@ def extract_beam_horizontal_from_clusters(
                 "beam_header_row_index": hdr_i,
                 "beam_column_keys": col_keys,
             }
+            ml = _beam_horizontal_wide_match_lines(rows_cluster, col_keys, rows_out)
+            if ml:
+                meta["beam_vertical_member_zone_match_lines"] = ml
+            fh_syn, strips_syn = _beam_horizontal_or_tree_synth_strips_and_headers(
+                rows_out, ml, rows_cluster
+            )
+            if fh_syn and strips_syn:
+                meta["beam_vertical_field_headers"] = fh_syn
+                meta["beam_vertical_strips"] = strips_syn
             return rows_out, meta
 
     narrow = _find_beam_narrow_header(cell_rows)
@@ -592,11 +812,18 @@ def extract_beam_horizontal_from_clusters(
             row_y_means=row_y_means,
         )
         if grouped:
-            return grouped, {
+            meta_lt = {
                 "beam_location_tree": True,
                 "beam_header_row_index": hi,
                 "beam_column_keys": nk,
             }
+            fh_g, strips_g = _beam_horizontal_or_tree_synth_strips_and_headers(
+                grouped, None, rows_cluster
+            )
+            if fh_g and strips_g:
+                meta_lt["beam_vertical_field_headers"] = fh_g
+                meta_lt["beam_vertical_strips"] = strips_g
+            return grouped, meta_lt
     return None
 
 
@@ -606,6 +833,12 @@ def _beam_lab_compact(lab: str) -> str:
 
 _RE_BEAM_MARK_PAREN_SIZE = re.compile(
     r"^(?P<body>.+?)\s*\(\s*(?P<a>\d{3,4})\s*[xX×]\s*(?P<b>\d{3,4})\s*\)\s*$",
+)
+
+# `BX1`·`RG11` 등: 영문 접두 + 숫자(스케줄용 _RE_BEAM_MARK_LIKE는 글자·숫자 사이 공백을 요구해 BX1 누락됨).
+_RE_BEAM_MEMBER_ID_LOOSE = re.compile(
+    r"^\s*[A-Z]+\d[A-Z0-9]*\s*(?:\(.+\))?\s*$",
+    re.I,
 )
 
 
@@ -860,6 +1093,82 @@ def _beam_vertical_text_looks_like_member_title(text: str) -> bool:
     if re.fullmatch(r"(?i)(width|depth|type|name|mark|material)", body):
         return False
     return True
+
+
+def _beam_vertical_prepare_bands_for_template_map(
+    bands: list[tuple[float, str]],
+    template: list[tuple[float, str, str]],
+) -> list[tuple[float, str]]:
+    """
+    템플릿 매핑 직전: **밴드 텍스트는 잘라내지 않는다**(단면·부위·부호 우측 셀 누락 방지).
+    단면(형태) Y에 가까운 순으로만 정렬해 `_map_data_bands_to_template` 스냅 순서를 안정화한다.
+    """
+    if not bands:
+        return []
+    sec_y = _beam_vertical_row_section_anchor_y(template)
+    if sec_y is None:
+        return list(bands)
+    sy = float(sec_y)
+    out = list(bands)
+    out.sort(key=lambda p: (abs(float(p[0]) - sy), -float(p[0])))
+    return out
+
+
+def _beam_vertical_next_other_member_row_y_in_strip(
+    strip: list[dict[str, Any]],
+    xc_strip: float,
+    y_cutoff: float,
+    current_mark_disp: str,
+    *,
+    x_gate: float = 4500.0,
+    gap_below_cutoff: float = 55.0,
+) -> float | None:
+    """
+    같은 스트립에서 `y_cutoff`(형태/단면 기준 Y)보다 **아래**(world Y가 더 작은 쪽)에 나타나는
+    **다른 부재** 부호 텍스트 Y 중, `y_cutoff`에 가장 가까운(가장 큰 Y) 한 줄.
+    그 줄 아래는 다음 부재 구역이므로, 그 **위**만 현재 부재로 읽는다.
+    """
+    want = _beam_member_title_norm_for_infer(str(current_mark_disp or "").strip())
+    best: float | None = None
+    x0 = float(xc_strip)
+    yc = float(y_cutoff)
+    for it in strip or []:
+        t = str(it.get("text") or "").strip()
+        if not t or not _beam_vertical_text_looks_like_member_title(t):
+            continue
+        try:
+            xf = float(it["x"])
+            yf = float(it["y"])
+        except (TypeError, KeyError, ValueError):
+            continue
+        if abs(xf - x0) > float(x_gate):
+            continue
+        if yf >= yc - float(gap_below_cutoff):
+            continue
+        ot = _beam_member_title_norm_for_infer(t)
+        if want and ot == want:
+            continue
+        if want and ot.startswith(want) and len(ot) <= len(want) + 8:
+            continue
+        if best is None or yf > best:
+            best = yf
+    return best
+
+
+def _beam_vertical_mark_hint_for_zone_dyn(
+    z_dyn: dict[str, str],
+    z_t: list[tuple[float, str, str]],
+    om_strip: str | None,
+) -> str:
+    om0 = str(om_strip or "").strip()
+    if om0:
+        return om0
+    for _y, lab, k in z_t:
+        if _beam_vertical_row_kind_from_title(lab) == "name":
+            v = str(z_dyn.get(k) or "").strip()
+            if v:
+                return v
+    return ""
 
 
 def _beam_vertical_cluster_mark_tuples_by_x(
@@ -2433,11 +2742,14 @@ def _beam_vertical_member_zone_match_polyline(
     y_name_ref: float,
     name_loose: float,
     mark_inferred: str,
+    template: list[tuple[float, str, str]] | None = None,
 ) -> dict[str, Any] | None:
     """
-    뷰어용 폴리라인: **부재명 TEXT → 부위 라벨 TEXT → 단면(형태) 행 앵커**(world Y는 위로 갈수록 증가하는 도면 기준,
-    즉 화면에서 부재명·부위가 단면보다 위에 있을 때 위→아래로 이어짐).
-    좌표는 해당 스트립 엔티티만 사용. 단면 행보다 아래(Y가 더 작은) 텍스트는 후보에서 제외해 상부근 등으로 선이 내려가지 않게 한다.
+    뷰어용 폴리라인: **궤적 좌표**는 스트립 X중심 × (부호행·부위행·단면행의 기준 Y)만 쓴다.
+    TEXT 실제 삽입 Y는 베이스라인 등으로 한 칸 아래 줄로 끌려가므로 선에 쓰지 않는다.
+    `mark`·`zone_text`만 스트립 안 문자열 후보에서 고른다.
+    세 점 연결 순서는 항상 **부호 TEXT → 부위 TEXT → 단면(열 X중심×형태 Y)**.
+    `template`가 있으면 같은 블록 안에서만 부호·부위 후보를 고른다.
     """
     mk = str(mark_inferred or "").strip()
     if not mk:
@@ -2457,10 +2769,30 @@ def _beam_vertical_member_zone_match_polyline(
 
     y_sec_f = float(section_anchor_y)
     # 부위·부호는 형태(단면) 행보다 위쪽(larger Y). 그보다 아래는 주근 행 등 — 매칭선이 내려가는 원인
-    y_strip_floor = y_sec_f - max(70.0, float(band_tol) * 11.0)
+    y_base_floor = y_sec_f - max(70.0, float(band_tol) * 11.0)
+    y_seg_lo: float | None = None
+    y_seg_hi: float | None = None
+    tpl = template if template else []
+    if tpl:
+        segs = _segment_template_rows(tpl, band_tol)
+        if segs:
+            seg_ix = _pick_template_segment_for_y(y_sec_f, tpl, segs, band_tol)
+            if seg_ix:
+                inter = _template_segment_y_intervals(tpl, [seg_ix], band_tol)
+                if inter:
+                    y_seg_lo, y_seg_hi, _ = inter[0]
+
+    y_low = max(y_base_floor, float(y_seg_lo)) if y_seg_lo is not None else y_base_floor
+
+    def _y_accept(y: float) -> bool:
+        if y < y_low:
+            return False
+        if y_seg_hi is not None and y > float(y_seg_hi) + 0.5:
+            return False
+        return True
 
     def _strip_above_section(pts: list[tuple[float, float]]) -> list[tuple[float, float]]:
-        return [(x, y) for x, y in pts if y >= y_strip_floor]
+        return [(x, y) for x, y in pts if _y_accept(float(y))]
 
     def _pick_near(
         pts: list[tuple[float, float]],
@@ -2500,7 +2832,7 @@ def _beam_vertical_member_zone_match_polyline(
             x, y = float(it["x"]), float(it["y"])
         except (TypeError, KeyError, ValueError):
             continue
-        if y < y_strip_floor:
+        if not _y_accept(y):
             continue
         d = (x - zp[0]) ** 2 + (y - zp[1]) ** 2
         if d < best_d:
@@ -2519,7 +2851,7 @@ def _beam_vertical_member_zone_match_polyline(
             x, y = float(it["x"]), float(it["y"])
         except (TypeError, KeyError, ValueError):
             continue
-        if y < y_strip_floor:
+        if not _y_accept(y):
             continue
         title_pts.append((x, y, t))
 
@@ -2529,6 +2861,8 @@ def _beam_vertical_member_zone_match_polyline(
         return dx * dx + dy * dy
 
     mp: tuple[float, float] | None = None
+    # 폴리라인이 붙은 부재명 TEXT(시각·JSON `mark`·부재별 표가 동일 출처가 되게)
+    poly_title = ""
     if title_pts:
         best_all = min(title_pts, key=lambda p: _dist2(p[0], p[1]))
         d_best = _dist2(best_all[0], best_all[1])
@@ -2540,12 +2874,16 @@ def _beam_vertical_member_zone_match_polyline(
                 slack = max(220.0**2, float(name_loose) ** 2 * 1.55)
                 if d_same <= d_best + slack:
                     mp = (best_same[0], best_same[1])
+                    poly_title = str(best_same[2]).strip()
                 else:
                     mp = (best_all[0], best_all[1])
+                    poly_title = str(best_all[2]).strip()
             else:
                 mp = (best_all[0], best_all[1])
+                poly_title = str(best_all[2]).strip()
         else:
             mp = (best_all[0], best_all[1])
+            poly_title = str(best_all[2]).strip()
     if mp is None:
         def _mark_pred(tx: str) -> bool:
             if not _beam_vertical_text_looks_like_member_title(tx):
@@ -2559,16 +2897,33 @@ def _beam_vertical_member_zone_match_polyline(
     if mp is None:
         mp = (float(xc_strip), float(y_name_ref))
 
-    sp = (float(xc_strip), float(section_anchor_y))
-    # 부재명(위) → 부위 → 단면(아래)
+    mark_shown = poly_title if poly_title else mk
+    if not poly_title and mp is not None and title_pts:
+        _bt = ""
+        _bd = 1e18
+        for _x, _y, _t in title_pts:
+            _d = (_x - mp[0]) ** 2 + (_y - mp[1]) ** 2
+            if _d < _bd:
+                _bd = _d
+                _bt = _t
+        _gate = max(600.0**2, float(name_loose) ** 2 * 4.0)
+        if _bt and str(_bt).strip() and _bd <= _gate:
+            mark_shown = str(_bt).strip()
+
+    ys = float(section_anchor_y)
+    # 부재·부위는 스트립에서 고른 **실제 TEXT 좌표**, 단면은 열 X중심×형태 행 Y.
+    # 뷰어·내비는 항상 **부호 → 부위 → 단면** 순으로 한 갈래만 잇는다(템플릿 Y로 재정렬하면
+    # 좌표계에 따라 꺾임·허공 선이 생길 수 있음).
+    x_draw = float(xc_strip)
     pts = [
-        [round(mp[0], 4), round(mp[1], 4)],
-        [round(zp[0], 4), round(zp[1], 4)],
-        [round(sp[0], 4), round(sp[1], 4)],
+        [round(float(mp[0]), 4), round(float(mp[1]), 4)],
+        [round(float(zp[0]), 4), round(float(zp[1]), 4)],
+        [round(x_draw, 4), round(ys, 4)],
     ]
     return {
         "strip_index": int(strip_index),
-        "mark": mk,
+        "mark": mark_shown,
+        "mark_inferred": mk,
         "zone_text": zone_txt.strip(),
         "points": pts,
     }
@@ -2690,8 +3045,9 @@ def extract_beam_vertical_blocks(
         bands = _merge_strip_into_y_bands(strip, band_z)
         if len(template) >= 2:
             bands = _beam_vertical_filter_diagram_mm_bands(bands, template)
+            bands_map = _beam_vertical_prepare_bands_for_template_map(bands, template)
             dyn = _map_data_bands_to_template(
-                bands, template, band_tol, beam_vertical_schedule=True
+                bands_map, template, band_tol, beam_vertical_schedule=True
             )
             if not any(dyn.values()):
                 continue
@@ -2701,12 +3057,49 @@ def extract_beam_vertical_blocks(
                 for seg_i, (sub_dyn, sub_t, seg_indices) in enumerate(splits):
                     zone_parts = _split_beam_vertical_dyn_by_zone_spans(sub_dyn, sub_t)
                     for zs_i, (z_dyn, z_t) in enumerate(zone_parts):
+                        om_pre = strip_member_override.get(si)
+                        mk_hint = _beam_vertical_mark_hint_for_zone_dyn(
+                            z_dyn, z_t, str(om_pre).strip() if om_pre else ""
+                        )
+                        y_sec_h = _beam_vertical_row_section_anchor_y(z_t)
+                        ys_piece = [float(t[0]) for t in z_t]
+                        if y_sec_h is not None:
+                            y_cut = float(y_sec_h)
+                        elif ys_piece:
+                            y_cut = float(min(ys_piece))
+                        else:
+                            y_med_st = _beam_vertical_strip_y_median(strip)
+                            y_cut = float(y_med_st) if y_med_st is not None else 0.0
+                        x_gate_nm = max(4500.0, float(band_tol) * 18.0)
+                        y_next_m = _beam_vertical_next_other_member_row_y_in_strip(
+                            strip, xc, y_cut, mk_hint, x_gate=x_gate_nm
+                        )
+                        strip_read: list[dict[str, Any]] = list(strip)
+                        if y_next_m is not None:
+                            pad_nm = max(10.0, float(band_tol) * 1.65)
+                            floor_y = float(y_next_m) + pad_nm
+                            strip_read = [
+                                it for it in strip if float(it.get("y") or 0.0) >= floor_y
+                            ]
+                            if len(strip_read) < max(2, min(5, max(1, len(strip) // 5))):
+                                strip_read = list(strip)
+                        bands_local = _merge_strip_into_y_bands(strip_read, band_z)
+                        bands_local = _beam_vertical_filter_diagram_mm_bands(bands_local, z_t)
+                        bands_map_l = _beam_vertical_prepare_bands_for_template_map(bands_local, z_t)
+                        z_dyn2 = _map_data_bands_to_template(
+                            bands_map_l, z_t, band_tol, beam_vertical_schedule=True
+                        )
+                        z_use = (
+                            z_dyn2
+                            if any(str(v or "").strip() for v in z_dyn2.values())
+                            else z_dyn
+                        )
                         rec = _record_from_beam_vertical_dynamic(
-                            z_dyn,
+                            z_use,
                             z_t,
                             tsrc,
                             cfg,
-                            strip_bands=bands,
+                            strip_bands=bands_local,
                         )
                         if not _beam_vertical_record_useful(rec):
                             continue
@@ -2716,7 +3109,6 @@ def extract_beam_vertical_blocks(
                         om = strip_member_override.get(si)
                         if om and str(om).strip():
                             _beam_vertical_apply_inferred_mark_to_rec(rec, str(om).strip())
-                        ys_piece = [float(t[0]) for t in z_t]
                         tb = _beam_vertical_section_geom_y_bounds(z_t, band_tol)
                         if tb is not None:
                             y_lo, y_hi = tb
@@ -2731,7 +3123,13 @@ def extract_beam_vertical_blocks(
                             y_lo, y_hi = _beam_vertical_cap_row_y_span_to_one_schedule_block(
                                 y_lo, y_hi, z_t if z_t else template, band_tol
                             )
-                        rda = _row_data_anchor_y_from_strip_relaxed(strip, y_lo, y_hi, band_tol)
+                        if y_next_m is not None:
+                            pad_nm2 = max(10.0, float(band_tol) * 1.65)
+                            fy = float(y_next_m) + pad_nm2
+                            y_lo = max(float(y_lo), fy)
+                            if y_hi <= y_lo + 8.0:
+                                y_hi = y_lo + max(120.0, float(band_tol) * 14.0)
+                        rda = _row_data_anchor_y_from_strip_relaxed(strip_read, y_lo, y_hi, band_tol)
                         if rda is not None:
                             rec["row_data_anchor_y"] = rda
                         y_lo, y_hi = _beam_vertical_bind_row_bounds_to_seg_section_y(
@@ -2787,9 +3185,22 @@ def extract_beam_vertical_blocks(
     # 뷰어: 단면(형태) 앵커 Y×스트립 X → 부위 라벨 TEXT → 추론 부재명 TEXT (폴리라인 points)
     match_lines: list[dict[str, Any]] = []
     idb2 = meta.get("beam_vertical_member_layout_infer") or infer_dbg
+    idb2 = idb2 if isinstance(idb2, dict) else {}
+    yz_raw = idb2.get("y_zone_eff")
+    yn_raw = idb2.get("y_name")
+    # infer가 비어 있어도 템플릿만으로 Y 앵커를 채워 첫 경로에서 폴리라인을 만들 수 있게 한다.
+    if template:
+        if yn_raw is None:
+            ynt = _beam_vertical_template_name_row_y(template)
+            if ynt is not None:
+                yn_raw = float(ynt)
+        if yz_raw is None:
+            yze = _beam_vertical_template_zone_row_y_estimate(template)
+            if yze is not None:
+                yz_raw = float(yze)
+            elif yn_raw is not None:
+                yz_raw = float(yn_raw)
     try:
-        yz_raw = idb2.get("y_zone_eff")
-        yn_raw = idb2.get("y_name")
         if strip_infos and yz_raw is not None and yn_raw is not None:
             y_zone_g = float(yz_raw)
             y_name_g = float(yn_raw)
@@ -2847,11 +3258,12 @@ def extract_beam_vertical_blocks(
                     y_name_f,
                     loose_m,
                     mk,
+                    template=template,
                 )
                 if poly:
                     match_lines.append(poly)
     except (TypeError, ValueError):
-        match_lines = []
+        pass
     if not match_lines and template and strip_infos and strips:
         try:
             ys_all: list[float] = []
@@ -2932,13 +3344,13 @@ def extract_beam_vertical_blocks(
                         y_name_f,
                         loose_fb,
                         mk,
+                        template=template,
                     )
                     if poly:
                         match_lines.append(poly)
         except (TypeError, ValueError):
             pass
-    if match_lines:
-        meta["beam_vertical_member_zone_match_lines"] = match_lines
+    meta["beam_vertical_member_zone_match_lines"] = match_lines
 
     if pending_merge:
         grp: dict[tuple[int, int], list[tuple[float, dict[str, Any]]]] = defaultdict(list)
@@ -2956,6 +3368,342 @@ def extract_beam_vertical_blocks(
     return rows_out, meta
 
 
+def _row_starts_beam_member_bundle(row: list[dict[str, Any]]) -> bool:
+    if _row_has_beam_mark_like(row):
+        return True
+    for it in row or []:
+        t = str(it.get("text") or "").strip()
+        if not t:
+            continue
+        if _RE_BEAM_MEMBER_ID_LOOSE.match(t) and re.search(r"\d", t):
+            return True
+    return False
+
+
+def _beam_cluster_row_mean_y(row: list[dict[str, Any]]) -> float:
+    ys = [float(r["y"]) for r in row]
+    return sum(ys) / len(ys) if ys else 0.0
+
+
+def _beam_centroid_entities(ents: list[dict[str, Any]]) -> tuple[float, float] | None:
+    if not ents:
+        return None
+    xs: list[float] = []
+    ys: list[float] = []
+    for it in ents:
+        try:
+            xs.append(float(it["x"]))
+            ys.append(float(it["y"]))
+        except (TypeError, KeyError, ValueError):
+            continue
+    if not xs:
+        return None
+    return sum(xs) / len(xs), sum(ys) / len(ys)
+
+
+def _beam_row_split_label_value_row(
+    row: list[dict[str, Any]],
+) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
+    """한 Y행을 큰 X 간격 기준으로 좌(라벨)·우(값)로 나눈다."""
+    if not row:
+        return "", "", [], []
+    sorted_r = sorted(row, key=lambda r: float(r["x"]))
+    if len(sorted_r) == 1:
+        t = str(sorted_r[0].get("text") or "").strip()
+        return "", t, list(sorted_r), list(sorted_r)
+    xs = [float(r["x"]) for r in sorted_r]
+    best_ig = 0
+    best_g = -1.0
+    span = max(xs[-1] - xs[0], 1.0)
+    min_gap = max(36.0, span * 0.045)
+    for i in range(len(xs) - 1):
+        g = xs[i + 1] - xs[i]
+        if g > best_g:
+            best_g = g
+            best_ig = i
+    if best_g < min_gap:
+        parts = [str(r.get("text") or "").strip() for r in sorted_r if str(r.get("text") or "").strip()]
+        joined = " ".join(parts)
+        return "", joined, list(sorted_r), list(sorted_r)
+    left = sorted_r[: best_ig + 1]
+    right = sorted_r[best_ig + 1 :]
+    lab = " ".join(str(r.get("text") or "").strip() for r in left if str(r.get("text") or "").strip())
+    val = " ".join(str(r.get("text") or "").strip() for r in right if str(r.get("text") or "").strip())
+    return lab, val, left, right
+
+
+def _beam_row_cluster_segment_to_record(
+    block_rows: list[list[dict[str, Any]]],
+    cfg: ExtractionConfig,
+) -> dict[str, Any] | None:
+    if not block_rows:
+        return None
+    titles: dict[str, str] = {}
+    order: list[str] = []
+    cells: list[str] = []
+    for i, row in enumerate(sorted(block_rows, key=lambda br: -_beam_cluster_row_mean_y(br))):
+        lab, val, _left, _right = _beam_row_split_label_value_row(row)
+        k = _slug_field_key(lab or f"row_{i}", i)
+        order.append(k)
+        titles[k] = lab or ""
+        cells.append(val)
+    rec: dict[str, Any] = {
+        "category": CATEGORY_BEAM,
+        "wall_mode": cfg.wall_mode,
+        "beam_layout": "row_cluster_bundle",
+        "beam_row_role": "beam_row_cluster_bundle",
+        "beam_field_titles": titles,
+        "beam_field_key_order": order,
+        "cells": cells,
+    }
+    if cfg.building_tag:
+        rec["building"] = cfg.building_tag
+    _enrich_beam_vertical_record(rec)
+    ys_all: list[float] = []
+    for row in block_rows:
+        for it in row:
+            try:
+                ys_all.append(float(it["y"]))
+            except (TypeError, KeyError, ValueError):
+                continue
+    if ys_all:
+        rec["row_y_mean"] = round(sum(ys_all) / len(ys_all), 4)
+    if not _beam_vertical_record_useful(rec):
+        return None
+    return rec
+
+
+def _beam_row_bundle_match_line_for_segment(
+    block_rows: list[list[dict[str, Any]]],
+    rec: dict[str, Any],
+    strip_index: int,
+) -> dict[str, Any] | None:
+    mk = str(rec.get("mark") or "").strip()
+    if not mk or not block_rows:
+        return None
+    pt_n: tuple[float, float] | None = None
+    pt_z: tuple[float, float] | None = None
+    pt_s: tuple[float, float] | None = None
+    zone_txt = ""
+    w_pts: list[tuple[float, float]] = []
+    d_pts: list[tuple[float, float]] = []
+
+    for row in sorted(block_rows, key=lambda br: -_beam_cluster_row_mean_y(br)):
+        lab, val, _L, right = _beam_row_split_label_value_row(row)
+        lab_s = (lab or "").strip()
+        val_s = (val or "").strip()
+        fk = _beam_template_row_to_field_key(lab_s)
+        if pt_n is None and mk in val_s:
+            c = _beam_centroid_entities(right)
+            if c:
+                pt_n = c
+        if not zone_txt and _beam_vertical_zone_from_label(lab_s):
+            zone_txt = val_s or lab_s
+            c = _beam_centroid_entities(right)
+            if c:
+                pt_z = c
+        rk = _beam_vertical_row_kind_from_title(lab_s)
+        if rk == "section" or ("형" in lab_s and "태" in lab_s):
+            c = _beam_centroid_entities(right)
+            if c:
+                pt_s = c
+        if fk == "width_mm":
+            c = _beam_centroid_entities(right)
+            if c:
+                w_pts.append(c)
+        if fk == "depth_mm":
+            c = _beam_centroid_entities(right)
+            if c:
+                d_pts.append(c)
+
+    if pt_s is None and w_pts and d_pts:
+        pt_s = ((w_pts[0][0] + d_pts[0][0]) * 0.5, (w_pts[0][1] + d_pts[0][1]) * 0.5)
+    if pt_n is None:
+        for row in block_rows:
+            lab, val, _L, right = _beam_row_split_label_value_row(row)
+            if mk in (val or ""):
+                pt_n = _beam_centroid_entities(right)
+                break
+    if pt_z is None and pt_n is not None:
+        pt_z = pt_n
+        zone_txt = zone_txt or "—"
+    if pt_s is None and pt_n is not None and pt_z is not None:
+        pt_s = (pt_n[0] * 0.55 + pt_z[0] * 0.45, min(pt_n[1], pt_z[1]) - 120.0)
+    if not (pt_n and pt_z and pt_s):
+        return None
+    pts = [
+        [round(pt_n[0], 4), round(pt_n[1], 4)],
+        [round(pt_z[0], 4), round(pt_z[1], 4)],
+        [round(pt_s[0], 4), round(pt_s[1], 4)],
+    ]
+    return {
+        "strip_index": int(strip_index),
+        "mark": mk,
+        "mark_inferred": mk,
+        "zone_text": (zone_txt or "—").strip()[:80],
+        "points": pts,
+    }
+
+
+def _beam_row_cluster_block_y_bounds(
+    block_rows: list[list[dict[str, Any]]],
+) -> tuple[float, float] | None:
+    ys: list[float] = []
+    for row in block_rows or []:
+        for it in row or []:
+            try:
+                ys.append(float(it["y"]))
+            except (TypeError, KeyError, ValueError):
+                continue
+    if not ys:
+        return None
+    return (min(ys), max(ys))
+
+
+def _beam_row_cluster_synth_strips_and_headers(
+    rows_out: list[dict[str, Any]],
+    match_lines: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """
+    Y행 묶음 번들은 세로 블록용 strip/헤더가 비어 있어 단면 enrich가 스킵된다.
+    매칭 폴리라인(또는 블록 텍스트 중심)으로 스트립 X·합성 '형 태' 헤더 Y를 만든다.
+    """
+    if not rows_out:
+        return [], []
+    xc_by_si: dict[int, float] = {}
+    for line in match_lines or []:
+        try:
+            si = int(line.get("strip_index"))
+        except (TypeError, ValueError):
+            continue
+        pts = line.get("points")
+        if not isinstance(pts, list) or not pts:
+            continue
+        xs: list[float] = []
+        for p in pts[:4]:
+            if isinstance(p, (list, tuple)) and len(p) >= 1:
+                try:
+                    xs.append(float(p[0]))
+                except (TypeError, ValueError):
+                    pass
+        if xs:
+            xc_by_si[si] = sum(xs) / len(xs)
+    max_si = -1
+    for r in rows_out:
+        try:
+            si = int(r.get("beam_bundle_segment_index", 0))
+        except (TypeError, ValueError):
+            si = 0
+        max_si = max(max_si, si)
+    strip_infos: list[dict[str, Any]] = []
+    for si in range(max_si + 1):
+        xc = float(xc_by_si.get(si) or 0.0)
+        if xc == 0.0:
+            for rr in rows_out:
+                try:
+                    rsi = int(rr.get("beam_bundle_segment_index", -1))
+                except (TypeError, ValueError):
+                    continue
+                if rsi != si:
+                    continue
+                cx = rr.get("_beam_row_cluster_centroid_x")
+                if cx is not None:
+                    try:
+                        xc = float(cx)
+                    except (TypeError, ValueError):
+                        pass
+                break
+        strip_infos.append({"index": si, "x_center": xc, "entity_count": 0})
+    ys_mean: list[float] = []
+    for r in rows_out:
+        ry = r.get("row_y_mean")
+        if ry is not None:
+            try:
+                ys_mean.append(float(ry))
+            except (TypeError, ValueError):
+                pass
+    y_tmpl = (max(ys_mean) + 280.0) if ys_mean else 0.0
+    field_headers = [
+        {"key": "section_shape", "label": "형 태", "y": round(float(y_tmpl), 4)},
+    ]
+    return field_headers, strip_infos
+
+
+def extract_beam_row_cluster_bundle(
+    rows_cluster: list[list[dict[str, Any]]],
+    cfg: ExtractionConfig,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """
+    와이드/Location 헤더 없이, **Y행 묶음만**으로 부호(부재명)→부위→단면→철근을 읽는다.
+    부호가 나오는 행을 기준으로 아래로 이어지는 행을 한 부재 블록으로 묶는다(세로 블록 X분할 없음).
+    """
+    meta: dict[str, Any] = {
+        "beam_row_cluster_bundle": True,
+        "beam_vertical_blocks": False,
+        "beam_vertical_strips": [],
+        "beam_vertical_field_headers": [],
+    }
+    if not rows_cluster:
+        return [], meta
+
+    sorted_rows = sorted(rows_cluster, key=lambda r: -_beam_cluster_row_mean_y(r))
+    segments: list[list[list[dict[str, Any]]]] = []
+    buf: list[list[dict[str, Any]]] | None = None
+    for row in sorted_rows:
+        if _row_is_beam_header_like(row):
+            continue
+        if _row_starts_beam_member_bundle(row):
+            if buf:
+                segments.append(buf)
+            buf = [row]
+        else:
+            if buf is not None:
+                buf.append(row)
+    if buf:
+        segments.append(buf)
+
+    rows_out: list[dict[str, Any]] = []
+    match_lines: list[dict[str, Any]] = []
+    for si, block in enumerate(segments):
+        rec = _beam_row_cluster_segment_to_record(block, cfg)
+        if not rec:
+            continue
+        rec["beam_bundle_segment_index"] = si
+        rec["beam_vertical_merged_strip_indices"] = [int(si)]
+        yb = _beam_row_cluster_block_y_bounds(block)
+        if yb is not None:
+            rec["row_data_anchor_y_bounds"] = [round(float(yb[0]), 4), round(float(yb[1]), 4)]
+        cc = _beam_centroid_entities([it for row in block for it in (row or [])])
+        if cc:
+            rec["_beam_row_cluster_centroid_x"] = round(float(cc[0]), 4)
+            rec["_beam_row_cluster_centroid_y"] = round(float(cc[1]), 4)
+        rows_out.append(rec)
+        poly = _beam_row_bundle_match_line_for_segment(block, rec, si)
+        if poly:
+            match_lines.append(poly)
+
+    meta["beam_vertical_member_zone_match_lines"] = match_lines
+    fh_syn, strips_syn = _beam_row_cluster_synth_strips_and_headers(rows_out, match_lines)
+    if fh_syn and strips_syn:
+        meta["beam_vertical_field_headers"] = fh_syn
+        meta["beam_vertical_strips"] = strips_syn
+    return rows_out, meta
+
+
+# 테스트·하위 호환: `beam_flat_spatial` 구현 별칭
+_beam_flat_section_focus_y_bounds = beam_flat_section_focus_y_bounds
+
+
+def _first_flat_row_mark(cells: list[str]) -> str:
+    for c in cells:
+        t = (c or "").strip()
+        if not t:
+            continue
+        if RE_FLAT_BEAM_MARK.match(t) and re.search(r"\d", t):
+            return t
+    return ""
+
+
 def extract_beam_flat_fallback(
     rows_cluster: list[list[dict[str, Any]]],
     cfg: ExtractionConfig,
@@ -2964,7 +3712,8 @@ def extract_beam_flat_fallback(
     for row in rows_cluster:
         if len(row) < cfg.min_row_texts:
             continue
-        cells = [str(r.get("text") or "").strip() for r in sorted(row, key=lambda r: float(r["x"]))]
+        sorted_row = sorted(row, key=lambda r: float(r["x"]))
+        cells = [str(r.get("text") or "").strip() for r in sorted_row]
         merged = _merge_signals(cells)
         merged["category"] = CATEGORY_BEAM
         merged["wall_mode"] = cfg.wall_mode
@@ -2972,8 +3721,35 @@ def extract_beam_flat_fallback(
         merged["beam_row_role"] = "beam_flat"
         if cfg.building_tag:
             merged["building"] = cfg.building_tag
-        ys = [float(r["y"]) for r in row]
-        merged["row_y_mean"] = sum(ys) / len(ys)
+        ys = [float(r["y"]) for r in sorted_row]
+        xs = [float(r["x"]) for r in sorted_row]
+        merged["row_y_mean"] = round(sum(ys) / len(ys), 4)
+        merged["row_entity_bbox"] = [
+            round(min(xs), 4),
+            round(min(ys), 4),
+            round(max(xs), 4),
+            round(max(ys), 4),
+        ]
+        merged["entity_ids"] = [r.get("id") for r in sorted_row]
+        merged["_flat_sorted_entities"] = [
+            {
+                "x": round(float(r["x"]), 4),
+                "y": round(float(r["y"]), 4),
+                "text": str(r.get("text") or ""),
+                "id": r.get("id"),
+            }
+            for r in sorted_row
+        ]
+        merged["row_data_anchor_y_bounds"] = [round(min(ys), 4), round(max(ys), 4)]
+        merged["row_data_anchor_y"] = merged["row_y_mean"]
+        fy = beam_flat_section_focus_y_bounds(sorted_row)
+        if fy is not None:
+            merged["beam_flat_section_focus_y_bounds"] = [round(fy[0], 4), round(fy[1], 4)]
+        mf = _first_flat_row_mark(cells)
+        if mf:
+            merged["mark"] = mf
+            merged["name"] = mf
+            merged["member_label"] = mf
         rows_out.append(merged)
     return rows_out
 
@@ -2983,16 +3759,67 @@ def process_beam_extraction(
     items: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
     """
-    보 전용 추출: vertical_blocks → 가로 와이드/Location → 플랫.
+    보 전용 추출: **가로 Y묶음(rows_cluster)** 만 사용한다.
+    (1) 와이드/Location 헤더 표 → (2) 부호 행 기준으로 이어지는 행 묶음(row_cluster_bundle) → (3) 행당 flat.
+    세로 블록(좌 라벨/우 스트립) 경로는 호출하지 않는다.
     """
     layout = (cfg.beam_layout or "auto").strip().lower()
-    rows_cluster = cluster_rows(items, cfg.y_tolerance)
+    rows_raw = cluster_rows(items, cfg.y_tolerance)
+    n_row_raw = len(rows_raw)
+    glue_n = int(cfg.beam_row_merge_max_glue) if cfg.beam_row_merge_max_glue is not None else 4
+    if glue_n < 1:
+        glue_n = 4
+    cap_n = int(cfg.beam_row_merge_max_merged) if cfg.beam_row_merge_max_merged is not None else 512
+    if cap_n < 8:
+        cap_n = 512
+    rows_cluster = merge_beam_sparse_row_clusters(
+        rows_raw,
+        cfg.y_tolerance,
+        y_gap_max=cfg.beam_row_merge_y_max,
+        max_glue_row_items=glue_n,
+        max_merged_row_items=cap_n,
+    )
+    n_after_sparse = len(rows_cluster)
+
+    gap_used = cfg.beam_row_merge_y_max
+    if gap_used is None or gap_used <= 0:
+        gap_used = max(float(cfg.y_tolerance) * 3.5, 10.0)
+
+    br_ep = int(cfg.beam_row_bridge_max_endpoint) if cfg.beam_row_bridge_max_endpoint is not None else 4
+    br_ep = max(2, br_ep)
+    br_mid = int(cfg.beam_row_bridge_max_mid) if cfg.beam_row_bridge_max_mid is not None else 1
+    br_mid = max(0, br_mid)
+    br_pass = int(cfg.beam_row_bridge_passes) if cfg.beam_row_bridge_passes is not None else 1
+    br_pass = max(1, br_pass)
+
+    rows_cluster = bridge_beam_sparse_row_clusters(
+        rows_cluster,
+        float(gap_used),
+        max_endpoint_items=br_ep,
+        max_intermediate_row_items=br_mid,
+        max_merged_row_items=cap_n,
+        max_bridge_passes=br_pass,
+    )
+    n_row_merged = len(rows_cluster)
     wall_mode = cfg.wall_mode
     building = cfg.building_tag
 
     validation: dict[str, Any] = {
         "category": CATEGORY_BEAM,
         "beam_layout_resolved": layout,
+        "beam_row_cluster_merge": {
+            "before_row_count": n_row_raw,
+            "after_sparse_merge_row_count": n_after_sparse,
+            "after_bridge_row_count": n_row_merged,
+            "y_gap_max_used": round(float(gap_used), 4),
+            "max_glue_row_items": glue_n,
+            "max_merged_row_items": cap_n,
+            "bridge_max_endpoint_items": br_ep,
+            "bridge_max_mid_row_items": br_mid,
+            "bridge_passes": br_pass,
+        },
+        "row_cluster_y_tolerance": cfg.y_tolerance,
+        "beam_row_clusters": beam_row_clusters_for_validation(rows_cluster),
     }
 
     if layout == "flat":
@@ -3000,35 +3827,46 @@ def process_beam_extraction(
         validation["beam_layout_resolved"] = "flat"
         return _finalize_beam_extraction_rows(rows_f), validation
 
-    if layout == "vertical_blocks":
-        rows_v, vb_meta = extract_beam_vertical_blocks(items, cfg)
-        validation["beam_vertical_blocks"] = True
-        validation.update(vb_meta)
-        return _finalize_beam_extraction_rows(rows_v), validation
-
-    if layout in ("auto", "horizontal_wide"):
+    def _try_horizontal_bundle() -> tuple[list[dict[str, Any]], dict[str, Any]] | None:
         hw = extract_beam_horizontal_from_clusters(
             rows_cluster, wall_mode=wall_mode, building=building
         )
-        if hw:
-            rows_h, meta = hw
+        if not hw:
+            return None
+        rows_h, meta = hw
+        return (rows_h, meta) if rows_h else None
+
+    if layout in ("auto", "vertical_blocks", "horizontal_wide"):
+        hb = _try_horizontal_bundle()
+        if hb:
+            rows_h, meta = hb
             validation["beam_wide_or_tree"] = True
+            validation["beam_vertical_blocks"] = False
+            validation["beam_row_cluster_bundle"] = False
             validation.update(meta)
             validation["beam_layout_resolved"] = (
                 "horizontal_wide" if meta.get("beam_wide_table") else "horizontal_location_tree"
             )
             return _finalize_beam_extraction_rows(rows_h), validation
 
-    if layout in ("auto", "horizontal_wide"):
-        rows_v, vb_meta = extract_beam_vertical_blocks(items, cfg)
-        if rows_v:
-            validation["beam_vertical_blocks"] = True
-            validation["beam_layout_resolved"] = "vertical_blocks"
-            validation.update(vb_meta)
-            return _finalize_beam_extraction_rows(rows_v), validation
+        rows_b, meta_b = extract_beam_row_cluster_bundle(rows_cluster, cfg)
+        if rows_b:
+            validation["beam_vertical_blocks"] = False
+            validation["beam_row_cluster_bundle"] = True
+            validation.update(meta_b)
+            validation["beam_layout_resolved"] = "row_cluster_bundle"
+            return _finalize_beam_extraction_rows(rows_b), validation
+
+        rows_f = extract_beam_flat_fallback(rows_cluster, cfg)
+        validation["beam_layout_resolved"] = "flat"
+        validation["beam_vertical_blocks"] = False
+        validation["beam_row_cluster_bundle"] = False
+        return _finalize_beam_extraction_rows(rows_f), validation
 
     rows_f = extract_beam_flat_fallback(rows_cluster, cfg)
     validation["beam_layout_resolved"] = "flat"
+    validation["beam_vertical_blocks"] = False
+    validation["beam_row_cluster_bundle"] = False
     return _finalize_beam_extraction_rows(rows_f), validation
 
 

@@ -2,6 +2,7 @@
 import pytest
 
 from app.services.schedule_extraction import (
+    bridge_beam_sparse_row_clusters,
     _apply_column_member_story_parse_error_flag,
     _build_y_template_from_bands,
     _enrich_vertical_block_record,
@@ -15,8 +16,75 @@ from app.services.schedule_extraction import (
     _strip_concrete_strength_snippets,
     _strip_mismatched_draw_mark_callouts,
     cluster_rows,
+    merge_beam_sparse_row_clusters,
     parse_text_signals,
 )
+
+
+def test_merge_beam_sparse_row_clusters_joins_two_slightly_separated_cells():
+    """Y가 y_tolerance를 넘겨 cluster_rows 가 두 줄로 쪼갠 뒤에도, 얇은 행이면 한 수평 묶음으로 병합."""
+    row_a = [{"x": 0.0, "y": 100.0, "text": "A", "id": 1}]
+    row_b = [{"x": 500.0, "y": 95.0, "text": "B", "id": 2}]
+    out = merge_beam_sparse_row_clusters([row_a, row_b], y_tol=2.5, y_gap_max=12.0)
+    assert len(out) == 1
+    assert len(out[0]) == 2
+    assert sorted(c["x"] for c in out[0]) == [0.0, 500.0]
+
+
+def test_merge_beam_sparse_row_clusters_respects_large_vertical_gap():
+    row_a = [{"x": 0.0, "y": 100.0, "text": "A", "id": 1}]
+    row_b = [{"x": 0.0, "y": 40.0, "text": "B", "id": 2}]
+    out = merge_beam_sparse_row_clusters([row_a, row_b], y_tol=2.5, y_gap_max=12.0)
+    assert len(out) == 2
+
+
+def test_merge_beam_sparse_row_clusters_chains_many_cells_along_x():
+    """가로로 긴 한 줄이 Y만 살짝 다르게 쪼개져도, 얇은 조각이면 끝까지 한 묶음으로."""
+    rows = [
+        [{"x": float(i * 120), "y": 200.0 - i * 0.6, "text": str(i), "id": i}] for i in range(8)
+    ]
+    out = merge_beam_sparse_row_clusters(
+        rows, y_tol=2.5, y_gap_max=20.0, max_glue_row_items=1, max_merged_row_items=256
+    )
+    assert len(out) == 1
+    assert len(out[0]) == 8
+
+
+def test_bridge_beam_sparse_row_clusters_merges_far_apart_same_band():
+    """가로로 멀리 떨어진 부호가 Y만 비슷하면 한 행으로 가교 병합(사이는 1텍스트 이하만 허용)."""
+    left = [{"x": 0.0, "y": 100.0, "text": "RG13B", "id": 1}]
+    spacer = [{"x": 400.0, "y": 99.6, "text": "-", "id": 9}]
+    right = [{"x": 1200.0, "y": 99.85, "text": "RG13B", "id": 2}]
+    out = bridge_beam_sparse_row_clusters(
+        [left, spacer, right],
+        15.0,
+        max_endpoint_items=4,
+        max_intermediate_row_items=1,
+        max_merged_row_items=64,
+        max_bridge_passes=1,
+    )
+    # Y 정렬 후 왼쪽·오른쪽 부호가 인접해 병합되고, 아래쪽 얇은 spacer 행은 남는다.
+    assert len(out) == 2
+    wide = max(out, key=len)
+    assert len(wide) == 2
+    xs = sorted(c["x"] for c in wide)
+    assert xs[0] == 0.0 and xs[1] == 1200.0
+
+
+def test_bridge_beam_sparse_row_clusters_blocked_by_dense_middle():
+    """두 끝 Y사이에(열린 구간) 조밀한 행이 있으면 가로로 멀어도 부호끼리 병합하지 않음."""
+    left = [{"x": 0.0, "y": 100.0, "text": "A", "id": 1}]
+    dense = [{"x": float(i * 20), "y": 99.75, "text": str(i), "id": i} for i in range(5)]
+    right = [{"x": 800.0, "y": 99.5, "text": "B", "id": 2}]
+    out = bridge_beam_sparse_row_clusters(
+        [left, dense, right],
+        18.0,
+        max_endpoint_items=4,
+        max_intermediate_row_items=1,
+        max_merged_row_items=64,
+        max_bridge_passes=3,
+    )
+    assert len(out) == 3
 
 
 def test_parse_d_at_x():
