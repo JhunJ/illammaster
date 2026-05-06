@@ -6412,7 +6412,7 @@
       const T = (texts || []).join(' ').replace(/\s+/g, ' ').trim();
       if (!T) return '';
       if (/형\s*태|단면\s*도|SECTION/i.test(T)) return 'section';
-      if (/INT\.|ALL\.|^\s*ALL\s*$|CENTER|END\s*\(|BOTH/i.test(T)) return 'zone';
+      if (/INT\.|ALL\.|^\s*ALL\s*$|CENTER|END\s*\(|BOTH|\bEXT\b|EXTERIOR|외단|외측/i.test(T)) return 'zone';
       if (/\bRG\d|\bBX\d|[A-Z]{1,3}\s*\d{1,4}[A-Z]?\s*\(\s*\d{3,4}/i.test(T)) return 'mark';
       if (/^\s*[A-Z]{1,3}\s*\d{1,4}[A-Z]?\s*(?:\(.+\))?\s*$/i.test(T) && /\d/.test(T)) return 'mark';
       return '';
@@ -6589,8 +6589,13 @@
       return !!(s && markRe.test(s) && /\d/.test(s));
     }
     function zoneKey(t) {
-      const s = String(t || '').toUpperCase().replace(/\s+/g, '');
+      const raw = String(t || '').trim();
+      if (!raw) return '';
+      const s = raw.toUpperCase().replace(/\s+/g, '');
       if (!s) return '';
+      // EXT는 "TEXT" 등에 부분 문자열로만 들어가는 경우가 있어 단어 경계·한글 표기로만 인식
+      if (raw.indexOf('외단') >= 0 || raw.indexOf('외측') >= 0) return 'EXT';
+      if (/\bEXT\b/i.test(raw) || /\bEXTERIOR\b/i.test(raw)) return 'EXT';
       if (s.indexOf('INT') >= 0) return 'INT';
       if (s.indexOf('CENTER') >= 0 || s === 'CEN' || s.indexOf('CEN') === 0) return 'CENTER';
       if (s.indexOf('ALL') >= 0) return 'ALL';
@@ -6724,7 +6729,7 @@
       return dy + dx * 0.25;
     }
 
-    // --- A) 부호 행 ↔ 부위(INT/CENTER/ALL/END). Y축이 위가 큰 도면 / 반대 도면 모두: 평균 Y로 방향 잡고, 없으면 반대로 재시도.
+    // --- A) 부호 행 ↔ 부위(INT/CENTER/EXT/ALL/END). Y축이 위가 큰 도면 / 반대 도면 모두: 평균 Y로 방향 잡고, 없으면 반대로 재시도.
     function pickBestMark(z, lockedMarkEids) {
       function scanOne(preferAbove) {
         let best = null;
@@ -6763,7 +6768,7 @@
       memberZoneLines.push(L);
       locked.add(L.from.eid);
     }
-    // 나머지(INT/CENTER/END)
+    // 나머지(INT/CENTER/EXT/END 등)
     for (let i = 0; i < zones.length; i++) {
       const z = zones[i];
       if (z.z === 'ALL') continue;

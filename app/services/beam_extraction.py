@@ -3401,6 +3401,114 @@ def _beam_centroid_entities(ents: list[dict[str, Any]]) -> tuple[float, float] |
     return sum(xs) / len(xs), sum(ys) / len(ys)
 
 
+def _looks_like_value_text(s: str) -> bool:
+    """
+    좌측 라벨(헤더)로 오인되기 쉬운 값 텍스트를 구분해, 같은 R(가로띠)에서도 값이 라벨로 뭉치는 것을 방지한다.
+    """
+    t = (s or "").strip()
+    if not t:
+        return False
+    u = re.sub(r"\s+", "", t).upper()
+    if re.search(r"\d+\s*[-/]\s*\d+\s*-\s*(?:U?HD|SHD|D)\d+", u):
+        return True
+    if re.search(r"\b(?:U?HD|SHD|D)\d+\b", u) and re.search(r"\d", u):
+        return True
+    if "@" in u and re.search(r"\d", u):
+        return True
+    if re.search(r"\d+\s*[xX×]\s*\d+", t):
+        return True
+    if re.fullmatch(r"\d{2,5}", u):
+        return True
+    return False
+
+
+def _beam_cluster_mark_column_centers(block_rows: list[list[dict[str, Any]]]) -> list[float] | None:
+    """부호 행 후보 중 RE_FLAT_BEAM_MARK 열이 2개 이상인 행의 X중심 목록."""
+    rows_sorted = sorted(block_rows, key=lambda br: -_beam_cluster_row_mean_y(br))
+    best: list[float] = []
+    for row in rows_sorted:
+        marks: list[float] = []
+        for e in row:
+            t = re.sub(r"\s+", " ", str(e.get("text") or "").strip())
+            if not t or len(t) > 48:
+                continue
+            if not (RE_FLAT_BEAM_MARK.match(t) and re.search(r"\d", t)):
+                continue
+            try:
+                marks.append(float(e["x"]))
+            except (TypeError, KeyError, ValueError):
+                continue
+        if len(marks) >= 2 and len(marks) > len(best):
+            best = marks
+    if len(best) < 2:
+        return None
+    if len(best) > 40:
+        return None
+    return sorted(best)
+
+
+def _beam_row_label_and_cells_by_mark_centers(
+    row: list[dict[str, Any]],
+    centers: list[float],
+) -> tuple[str, list[str]]:
+    """한 Y행에서 좌측 라벨 + 부호열 N개 값을 분리."""
+    if not row:
+        return "", [""] * len(centers)
+    c_sorted = sorted(float(x) for x in centers)
+    c_count = len(c_sorted)
+    if c_count < 1:
+        parts = [str(r.get("text") or "").strip() for r in row if str(r.get("text") or "").strip()]
+        joined = " ".join(parts)
+        return "", [joined]
+
+    # 라벨 경계: 첫 부호 열보다 충분히 왼쪽
+    if c_count >= 2:
+        dx = max(1.0, c_sorted[1] - c_sorted[0])
+        x_label_hi = c_sorted[0] - max(120.0, min(420.0, dx * 0.45))
+    else:
+        x_label_hi = c_sorted[0] - 320.0
+
+    sorted_r = sorted(row, key=lambda r: float(r["x"]))
+    label_parts: list[str] = []
+    by_col: list[list[dict[str, Any]]] = [[] for _ in range(c_count)]
+    for e in sorted_r:
+        t = str(e.get("text") or "").strip()
+        if not t:
+            continue
+        try:
+            x = float(e["x"])
+        except (TypeError, KeyError, ValueError):
+            continue
+        # 값처럼 보이는 텍스트는 좌측 영역이어도 열에 배정(뭉침 방지)
+        if x <= x_label_hi and not _looks_like_value_text(t):
+            label_parts.append(t)
+            continue
+        j = min(range(c_count), key=lambda k: abs(x - c_sorted[k]))
+        by_col[j].append(e)
+
+    lab = " ".join(label_parts).strip()
+    cells: list[str] = []
+    for j in range(c_count):
+        ents = sorted(by_col[j], key=lambda r: float(r["x"]))
+        txts = [str(e.get("text") or "").strip() for e in ents if str(e.get("text") or "").strip()]
+        cells.append(" ".join(txts).strip())
+    return lab, cells
+
+
+def _bbox_union_from_entities(ents: list[dict[str, Any]]) -> list[float] | None:
+    xs: list[float] = []
+    ys: list[float] = []
+    for it in ents or []:
+        try:
+            xs.append(float(it["x"]))
+            ys.append(float(it["y"]))
+        except (TypeError, KeyError, ValueError):
+            continue
+    if not xs or not ys:
+        return None
+    return [round(min(xs), 4), round(min(ys), 4), round(max(xs), 4), round(max(ys), 4)]
+
+
 def _beam_row_split_label_value_row(
     row: list[dict[str, Any]],
 ) -> tuple[str, str, list[dict[str, Any]], list[dict[str, Any]]]:
@@ -3665,22 +3773,99 @@ def extract_beam_row_cluster_bundle(
     rows_out: list[dict[str, Any]] = []
     match_lines: list[dict[str, Any]] = []
     for si, block in enumerate(segments):
-        rec = _beam_row_cluster_segment_to_record(block, cfg)
-        if not rec:
+        # 같은 R(가로띠) 안에서도 부호(TEXT) 열 중심을 앵커로 삼아 부재별로 분리한다.
+        centers = _beam_cluster_mark_column_centers(block)
+        if not centers:
+            rec = _beam_row_cluster_segment_to_record(block, cfg)
+            if not rec:
+                continue
+            rec["beam_bundle_segment_index"] = si
+            rec["beam_vertical_merged_strip_indices"] = [int(si)]
+            yb = _beam_row_cluster_block_y_bounds(block)
+            if yb is not None:
+                rec["row_data_anchor_y_bounds"] = [round(float(yb[0]), 4), round(float(yb[1]), 4)]
+            cc = _beam_centroid_entities([it for row in block for it in (row or [])])
+            if cc:
+                rec["_beam_row_cluster_centroid_x"] = round(float(cc[0]), 4)
+                rec["_beam_row_cluster_centroid_y"] = round(float(cc[1]), 4)
+            rows_out.append(rec)
+            poly = _beam_row_bundle_match_line_for_segment(block, rec, si)
+            if poly:
+                match_lines.append(poly)
             continue
-        rec["beam_bundle_segment_index"] = si
-        rec["beam_vertical_merged_strip_indices"] = [int(si)]
+
+        rows_sorted = sorted(block, key=lambda br: -_beam_cluster_row_mean_y(br))
+        titles: dict[str, str] = {}
+        order: list[str] = []
+        matrix: list[list[str]] = []
+        for i, row in enumerate(rows_sorted):
+            lab, col_cells = _beam_row_label_and_cells_by_mark_centers(row, centers)
+            k = _slug_field_key(lab or f"row_{i}", i)
+            order.append(k)
+            titles[k] = lab or ""
+            matrix.append(list(col_cells) if col_cells else [""] * len(centers))
+
+        # 컬럼별 엔티티를 모아 bbox/centroid에 사용
+        c_sorted = sorted(float(x) for x in centers)
+        c_count = len(c_sorted)
+        ents_by_col: list[list[dict[str, Any]]] = [[] for _ in range(c_count)]
+        if c_count >= 2:
+            dx = max(1.0, c_sorted[1] - c_sorted[0])
+            x_label_hi = c_sorted[0] - max(120.0, min(420.0, dx * 0.45))
+        else:
+            x_label_hi = c_sorted[0] - 320.0
+        for row in rows_sorted:
+            for e in row or []:
+                t = str(e.get("text") or "").strip()
+                if not t:
+                    continue
+                try:
+                    x = float(e["x"])
+                except (TypeError, KeyError, ValueError):
+                    continue
+                if x <= x_label_hi and not _looks_like_value_text(t):
+                    continue
+                j = min(range(c_count), key=lambda k: abs(x - c_sorted[k]))
+                ents_by_col[j].append(e)
+
         yb = _beam_row_cluster_block_y_bounds(block)
-        if yb is not None:
-            rec["row_data_anchor_y_bounds"] = [round(float(yb[0]), 4), round(float(yb[1]), 4)]
-        cc = _beam_centroid_entities([it for row in block for it in (row or [])])
-        if cc:
-            rec["_beam_row_cluster_centroid_x"] = round(float(cc[0]), 4)
-            rec["_beam_row_cluster_centroid_y"] = round(float(cc[1]), 4)
-        rows_out.append(rec)
-        poly = _beam_row_bundle_match_line_for_segment(block, rec, si)
-        if poly:
-            match_lines.append(poly)
+        for j in range(c_count):
+            rec: dict[str, Any] = {
+                "category": CATEGORY_BEAM,
+                "wall_mode": cfg.wall_mode,
+                "beam_layout": "row_cluster_bundle",
+                "beam_row_role": "beam_row_cluster_bundle",
+                "beam_field_titles": titles,
+                "beam_field_key_order": order,
+                "cells": [matrix[fi][j] if fi < len(matrix) and j < len(matrix[fi]) else "" for fi in range(len(order))],
+                "beam_bundle_segment_index": si,
+                "beam_vertical_merged_strip_indices": [int(si)],
+            }
+            if cfg.building_tag:
+                rec["building"] = cfg.building_tag
+            mk = _first_flat_row_mark(rec["cells"])
+            if mk:
+                rec["mark"] = mk
+                rec["name"] = mk
+                rec["member_label"] = mk
+
+            _enrich_beam_vertical_record(rec)
+            if yb is not None:
+                rec["row_data_anchor_y_bounds"] = [round(float(yb[0]), 4), round(float(yb[1]), 4)]
+
+            bb = _bbox_union_from_entities(ents_by_col[j])
+            if bb is not None:
+                rec["row_entity_bbox"] = bb
+            cc = _beam_centroid_entities(ents_by_col[j])
+            if cc:
+                rec["_beam_row_cluster_centroid_x"] = round(float(cc[0]), 4)
+                rec["_beam_row_cluster_centroid_y"] = round(float(cc[1]), 4)
+
+            if _beam_vertical_record_useful(rec):
+                rows_out.append(rec)
+                poly = _beam_row_bundle_match_line_for_segment(block, rec, si)
+                if poly:
+                    match_lines.append(poly)
 
     meta["beam_vertical_member_zone_match_lines"] = match_lines
     fh_syn, strips_syn = _beam_row_cluster_synth_strips_and_headers(rows_out, match_lines)
