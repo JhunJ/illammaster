@@ -468,6 +468,56 @@
       background: #f6f8fa;
       border: 1px solid #eaeef2;
     }
+    .extract-read-path-card {
+      margin: 0 0 10px;
+      padding: 10px 12px;
+      border-radius: 6px;
+      background: #f0f7ff;
+      border: 1px solid #c8e1ff;
+      font-size: 0.74rem;
+      line-height: 1.45;
+      color: #24292f;
+    }
+    .extract-read-path-card h4 {
+      margin: 0 0 6px;
+      font-size: 0.78rem;
+      font-weight: 650;
+      color: #0969da;
+    }
+    .extract-read-path-card .extract-read-path-lead {
+      margin: 0 0 8px;
+    }
+    .extract-read-path-card ul {
+      margin: 0 0 8px;
+      padding-left: 1.15rem;
+    }
+    .extract-read-path-card .extract-read-path-code {
+      margin: 0 0 10px;
+      padding: 6px 8px;
+      border-radius: 4px;
+      background: rgba(255, 255, 255, 0.75);
+      border: 1px solid #dbeafe;
+      font-family: ui-monospace, Consolas, monospace;
+      font-size: 0.68rem;
+      word-break: break-all;
+      color: #1f2328;
+    }
+    .extract-read-path-card details.extract-read-path-concepts {
+      margin-top: 4px;
+      padding-top: 8px;
+      border-top: 1px dashed #b6d4fe;
+    }
+    .extract-read-path-card details.extract-read-path-concepts > summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #0550ae;
+      user-select: none;
+    }
+    .extract-read-path-card details.extract-read-path-concepts p {
+      margin: 8px 0 0;
+      font-size: 0.72rem;
+      color: #57606a;
+    }
     .panel.right .extract-run-table-host {
       max-height: min(42vh, 400px);
     }
@@ -1177,6 +1227,12 @@
               </div>
             </div>
           </div>
+          <div
+            id="extractIllamReadPathCard"
+            class="extract-read-path-card extract-result-outside-body"
+            style="display: none"
+            aria-live="polite"
+          ></div>
           <div id="extractResultSummary" class="extract-summary extract-result-outside-body">
             아직 추출 결과가 없습니다.
           </div>
@@ -1207,6 +1263,15 @@
       </div>
       <div class="panel-scroll extract-scroll">
         <div id="rpBeam" class="extract-tabpanel on" role="tabpanel" data-rptab="beam" data-extract-cat="beam">
+          <div class="cad-mini" style="margin: 6px 0 10px; padding: 8px 10px; background: #f6f8fa; border: 1px solid #eaeef2; border-radius: 6px">
+            <label class="row-check" style="margin: 0; align-items: flex-start; gap: 8px">
+              <input type="checkbox" id="chkBeamCirclePatternDebug" style="margin-top: 3px" checked />
+              <span style="line-height: 1.35">
+                <strong>원·선 패턴 단면 디버그</strong> — CIRCLE·직교선 기반 단면 후보(브라우저 오버레이). 서버는 flat 단일 경로로 단면을 읽습니다.
+                <span style="opacity: 0.85">「단면 오버레이」와 함께 켜 두면 서버 박스·브라우저 패턴을 동시에 비교할 수 있습니다.</span>
+              </span>
+            </label>
+          </div>
           <details id="beamRowClusterDebugWrap" class="extract-error-list-card" style="display:none">
             <summary class="extract-subsection-title" style="cursor:pointer;user-select:none">
               보 가로묶음(행 클러스터) 디버그 (닫힘/펼침)
@@ -1252,6 +1317,30 @@
               <button type="button" class="secondary" id="btnBeamFlatBelowMatchCopy">복사</button>
             </div>
             <pre id="beamFlatBelowMatchDebugPre" class="out" style="max-height:min(28vh, 240px)"></pre>
+          </details>
+          <details id="beamFlatBelowHitsRawDebugWrap" class="extract-error-list-card" style="display:none;margin-top:10px">
+            <summary class="extract-subsection-title" style="cursor:pointer;user-select:none">
+              보 flat 하단 텍스트 원본(hits)·라벨/값 진단
+            </summary>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px">
+              <p class="hint" style="margin:0;font-size:0.72rem">
+                단면별 belowHits 원본 목록(역할 라벨 포함)과, `크기`/`상부근` 라벨이 있을 때 실제로 어떤 값이 선택되는지(또는 왜 못 고르는지)를 보여줍니다.
+              </p>
+              <button type="button" class="secondary" id="btnBeamFlatBelowHitsRawCopy">복사</button>
+            </div>
+            <pre id="beamFlatBelowHitsRawDebugPre" class="out" style="max-height:min(32vh, 320px)"></pre>
+          </details>
+          <details id="beamFlatSegFilterDebugWrap" class="extract-error-list-card" style="display:none;margin-top:10px">
+            <summary class="extract-subsection-title" style="cursor:pointer;user-select:none">
+              보 flat 선분(묶임/제외) 디버그
+            </summary>
+            <div style="display:flex;align-items:center;justify-content:space-between;gap:8px;margin-top:8px">
+              <p class="hint" style="margin:0;font-size:0.72rem">
+                단면 bbox 내부 선분 수, 원 클러스터 근접 선분 채택/제외(겹침/긴직선) 통계를 표시합니다.
+              </p>
+              <button type="button" class="secondary" id="btnBeamFlatSegFilterCopy">복사</button>
+            </div>
+            <pre id="beamFlatSegFilterDebugPre" class="out" style="max-height:min(28vh, 240px)"></pre>
           </details>
         </div>
 
@@ -1741,6 +1830,8 @@
   let columnBboxSelectDown = null;
   /** 기둥 추출 결과의 section_geometry 를 캔버스에 겹쳐 그릴지 (부재·단면 매칭 확인용) */
   let showColumnSectionOverlays = true;
+  /** 보: 브라우저 원(CIRCLE)·직교선 패턴 단면 분석 오버레이 — 비-flat일 때도 디버그로 중첩 표시 */
+  let showBeamCirclePatternDebugOverlay = false;
   /** 뷰어 툴바: 층(NAME) 등 추출 오류 강조(빨간 박스·안내) 표시 */
   let showViewerExtractErrors = true;
 
@@ -1748,6 +1839,13 @@
     if (columnExtractBboxes && columnExtractBboxes.length) return columnExtractBboxes;
     if (columnExtractBbox) return [columnExtractBbox];
     return [];
+  }
+
+  /** 원·선 패턴 디버그용 run — 추출 전이면 표 영역(selection_bboxes)만 채움 */
+  function beamCirclePatternDebugRunForOverlay() {
+    const r = lastRunByCategory.beam;
+    // 추출 실행 전에는 오버레이를 그리지 않는다(사용자가 버튼을 안 눌렀는데 “작동”해 보이는 문제 방지)
+    return r || null;
   }
 
   function hitColumnBboxInsideIndexFromWorld(wx, wy) {
@@ -2863,6 +2961,20 @@
       if (zi >= 0) head += ' 존' + (zi + 1);
       head += ' · ' + mark + (zlab ? ' [' + zlab + ']' : '');
       lines.push(head);
+      // flat 단일 경로: 서버가 채운 부재명/부위/하단텍스트를 함께 표시
+      const mm = String((z && z.member_mark_text) || r.member_mark_text || '').trim();
+      const mz = String((z && z.member_zone_text) || r.member_zone_text || '').trim();
+      if (mm || mz) lines.push('  [매칭] 부재명=' + (mm || '-') + ' · 부위=' + (mz || '-'));
+      const rv = (z && z.below_text_role_values) || r.below_text_role_values;
+      if (rv && typeof rv === 'object') {
+        const bits = [];
+        if (rv['크기']) bits.push('크기=' + rv['크기']);
+        if (rv['상부근']) bits.push('상부근=' + rv['상부근']);
+        if (rv['하부근']) bits.push('하부근=' + rv['하부근']);
+        if (rv['스트럽']) bits.push('스트럽=' + rv['스트럽']);
+        if (rv['표피철근']) bits.push('표피=' + rv['표피철근']);
+        if (bits.length) lines.push('  [하단텍스트] ' + bits.join(' · '));
+      }
       if (
         zi <= 0 &&
         r.beam_flat_section_focus_y_bounds &&
@@ -3787,6 +3899,57 @@
       const nMat = pl.below_text_match_count != null ? Number(pl.below_text_match_count) : 0;
       const nDim = pl.dim_text_count != null ? Number(pl.dim_text_count) : 0;
       lines.push('#' + (i + 1) + ' hit=' + nHit + ' match=' + nMat + ' dim=' + nDim + ' ' + dir + ' mode=' + mode);
+      const segIn = pl.seg_in_bbox_count != null ? Number(pl.seg_in_bbox_count) : null;
+      const segInH = pl.seg_in_bbox_h != null ? Number(pl.seg_in_bbox_h) : null;
+      const segInV = pl.seg_in_bbox_v != null ? Number(pl.seg_in_bbox_v) : null;
+      const ns = pl.near_seg_debug || null;
+      if (segIn != null || ns) {
+        const nearKeep = ns && ns.keep != null ? Number(ns.keep) : 0;
+        const nearH = ns && ns.keep_h != null ? Number(ns.keep_h) : 0;
+        const nearV = ns && ns.keep_v != null ? Number(ns.keep_v) : 0;
+        const rejOv = ns && ns.rej_overlap != null ? Number(ns.rej_overlap) : 0;
+        const rejLong = ns && ns.rej_long_straight != null ? Number(ns.rej_long_straight) : 0;
+        const candH = ns && ns.cand_h != null ? Number(ns.cand_h) : 0;
+        const candV = ns && ns.cand_v != null ? Number(ns.cand_v) : 0;
+        lines.push(
+          '  - [선분] bbox_in=' +
+            (segIn != null ? segIn : '-') +
+            ' (H=' +
+            (segInH != null ? segInH : '-') +
+            ', V=' +
+            (segInV != null ? segInV : '-') +
+            ') | near_keep=' +
+            nearKeep +
+            ' (H=' +
+            nearH +
+            ', V=' +
+            nearV +
+            ') cand(H/V)=' +
+            candH +
+            '/' +
+            candV +
+            ' rej(overlap/longStraight)=' +
+            rejOv +
+            '/' +
+            rejLong,
+        );
+        if (ns && (ns.maxHorzRun != null || ns.maxVertRun != null)) {
+          lines.push(
+            '    - [선분필터] maxHorzRun=' +
+              (ns.maxHorzRun != null ? Number(ns.maxHorzRun).toFixed(1) : '-') +
+              ' maxVertRun=' +
+              (ns.maxVertRun != null ? Number(ns.maxVertRun).toFixed(1) : '-') +
+              ' minOverlap=' +
+              (ns.minOverlap != null ? Number(ns.minOverlap).toFixed(3) : '-') +
+              ' pad=' +
+              (ns.pad != null ? Number(ns.pad) : '-') +
+              ' padTop=' +
+              (ns.padTop != null ? Number(ns.padTop).toFixed(1) : '-') +
+              ' coreSlack=' +
+              (ns.coreSlack != null ? Number(ns.coreSlack).toFixed(1) : '-'),
+          );
+        }
+      }
       if (pl.member_mark_dims) {
         lines.push(
           '  - [부재표기치수] B=' +
@@ -3835,6 +3998,374 @@
     }
     const plain = lines.join('\n');
     window.__lastBeamFlatBelowMatchDebugPlain = plain;
+    pre.textContent = plain;
+    if (btn) btn.disabled = !plain;
+  }
+
+  function fillBeamFlatBelowHitsRawDebug() {
+    const wrap = $('beamFlatBelowHitsRawDebugWrap');
+    const pre = $('beamFlatBelowHitsRawDebugPre');
+    const btn = $('btnBeamFlatBelowHitsRawCopy');
+    if (!wrap || !pre) return;
+    if (activeExtractTabKey() !== 'beam') {
+      wrap.style.display = 'none';
+      pre.textContent = '';
+      window.__lastBeamFlatBelowHitsRawDebugPlain = '';
+      if (btn) btn.disabled = true;
+      return;
+    }
+    const runB = lastRunByCategory.beam;
+    if (runB && (!Array.isArray(runB.beam_flat_merged_section_analysis) || !runB.beam_flat_merged_section_analysis.length)) {
+      beamFlatEnsureMergedSectionAnalysis(runB);
+    }
+    const arr = runB && Array.isArray(runB.beam_flat_merged_section_analysis) ? runB.beam_flat_merged_section_analysis : [];
+    wrap.style.display = 'block';
+    if (!runB) {
+      const msg = '[보 flat 하단 텍스트 원본(hits)·라벨/값 진단]\n- 보 추출 실행 전입니다.';
+      window.__lastBeamFlatBelowHitsRawDebugPlain = msg;
+      pre.textContent = msg;
+      if (btn) btn.disabled = false;
+      return;
+    }
+    if (!arr.length) {
+      const msg =
+        '[보 flat 하단 텍스트 원본(hits)·라벨/값 진단]\n' +
+        '- flat 단면 분석 데이터가 아직 없습니다.\n' +
+        '- 단면 오버레이가 켜진 상태에서 캔버스를 한 번 갱신(줌/팬/선택)하면 값이 채워집니다.';
+      window.__lastBeamFlatBelowHitsRawDebugPlain = msg;
+      pre.textContent = msg;
+      if (btn) btn.disabled = false;
+      return;
+    }
+
+    function debugPickValueInRowBand(hits, dir, rowLb, nextLb, roleKey) {
+      const isDownSmallY = String(dir || 'smallY') !== 'largeY';
+      function downAxis(y) {
+        return isDownSmallY ? -Number(y) : Number(y);
+      }
+      const lb = rowLb;
+      const dLb = downAxis(lb.y);
+      const dNext = nextLb ? downAxis(nextLb.y) : null;
+      const upTol = 30;
+      const bandTail = 6;
+      const cand = [];
+      for (let i = 0; i < (hits || []).length; i++) {
+        const c = hits[i];
+        if (!c || c === lb) continue;
+        if (beamFlatBelowTextRole(c.text)) continue;
+        if (roleKey !== 'size' && beamFlatLooksLikeDimensionText(c.text)) continue;
+        if (roleKey === 'size' && !beamFlatIsSectionBxHSizeText(String(c.text || ''))) continue;
+        if (roleKey === 'skin' && beamFlatLooksLikeMemberMarkText(c.text)) continue;
+        if (roleKey === 'skin' && !beamFlatLooksLikeRebarValueText(String(c.text || ''))) continue;
+        const dc = downAxis(c.y);
+        if (!Number.isFinite(dc)) continue;
+        if (dc < dLb - upTol) continue;
+        if (dNext != null && dc >= dNext - bandTail) continue;
+        const dxSigned = Number(c.x) - Number(lb.x);
+        if (!Number.isFinite(dxSigned)) continue;
+        const dy = Math.abs(Number(c.y) - Number(lb.y));
+        let dx = Math.abs(dxSigned);
+        if (roleKey === 'size') {
+          const dxRef = Number(c.dx);
+          dx = Number.isFinite(dxRef) ? Math.abs(dxRef) : dx;
+        } else {
+          if (dxSigned < -280) continue;
+        }
+        const s = roleKey === 'size' ? dy * 2.4 + dx * 0.12 : dy * 1.9 + dx * 0.017 + (dxSigned < 0 ? 6 : 0);
+        cand.push({ hit: c, score: s, dxSigned: dxSigned, dy: dy, dx: dx });
+      }
+      cand.sort(function (a, b) {
+        return a.score - b.score;
+      });
+      return { best: cand[0] || null, top: cand.slice(0, 5) };
+    }
+
+    const lines = [];
+    lines.push('[보 flat 하단 텍스트 원본(hits)·라벨/값 진단]');
+    lines.push('- 표준 규칙: `크기/상부근/하부근/스트럽/표피철근` 라벨(행 이름)을 찾고, 각 라벨 아래 행 밴드에서 값을 고릅니다.');
+    lines.push('- 이 패널은 “belowHits 목록에 뭐가 들어왔는지”와 “라벨이 있어도 왜 값이 못 붙는지”를 확인하는 용도입니다.\n');
+
+    for (let i = 0; i < arr.length; i++) {
+      const pl = arr[i] || {};
+      const dir = pl.below_text_dir || 'smallY';
+      const secNbPick = beamFlatNormSectionBBox(pl.norm_bbox || pl.section_bbox || null);
+      const belowPack = beamFlatCollectTextsBelowSectionCenter(
+        pl.centroid && pl.centroid.x,
+        pl.centroid && pl.centroid.y,
+        pl.norm_bbox || pl.section_bbox || null,
+      );
+      const hits = (belowPack && belowPack.hits) || [];
+      lines.push('#' + (i + 1) + ' belowHits=' + hits.length + ' dir=' + String(belowPack && belowPack.dir ? belowPack.dir : dir));
+
+      // 라벨 모으기
+      const roles = { size: [], top: [], bot: [], stirrup: [], skin: [] };
+      for (let k = 0; k < hits.length; k++) {
+        const h = hits[k];
+        const r = beamFlatBelowTextRole(h && h.text);
+        if (!r) continue;
+        if (roles[r]) roles[r].push(h);
+      }
+      function bestLabel(roleKey) {
+        const a = roles[roleKey] || [];
+        if (!a.length) return null;
+        a.sort(function (x, y) {
+          return (Number(x.score) || 0) - (Number(y.score) || 0);
+        });
+        return a[0];
+      }
+      const lbSize = bestLabel('size');
+      const lbTop = bestLabel('top');
+      const lbBot = bestLabel('bot');
+      const lbSt = bestLabel('stirrup');
+      const lbSk = bestLabel('skin');
+      lines.push(
+        '  - labels: ' +
+          ['크기', '상부근', '하부근', '스트럽', '표피']
+            .map(function (nm, idx) {
+              const lb = [lbSize, lbTop, lbBot, lbSt, lbSk][idx];
+              return nm + '=' + (lb ? ('"' + String(lb.text || '') + '"@(' + Math.round(lb.x) + ',' + Math.round(lb.y) + ')') : '없음');
+            })
+            .join(' · '),
+      );
+
+      // 아래 방향 정렬 기준: 라벨들이 있어야 밴드가 생김. size->top->bot... 순으로 rows를 만들 때 실제론 y로 정렬됨.
+      const rowLabels = [];
+      if (lbSize) rowLabels.push({ key: 'size', lb: lbSize });
+      if (lbTop) rowLabels.push({ key: 'top', lb: lbTop });
+      if (lbBot) rowLabels.push({ key: 'bot', lb: lbBot });
+      if (lbSt) rowLabels.push({ key: 'stirrup', lb: lbSt });
+      if (lbSk) rowLabels.push({ key: 'skin', lb: lbSk });
+      // downAxis로 정렬
+      const isDownSmallY = String((belowPack && belowPack.dir) || dir || 'smallY') !== 'largeY';
+      function downAxis(y) {
+        return isDownSmallY ? -Number(y) : Number(y);
+      }
+      rowLabels.sort(function (a, b) {
+        return downAxis(a.lb.y) - downAxis(b.lb.y);
+      });
+
+      function diagRow(roleKey, roleName) {
+        const idx = rowLabels.findIndex(function (r) {
+          return r.key === roleKey;
+        });
+        if (idx < 0) {
+          lines.push('  - [' + roleName + '] 라벨 없음');
+          if (roleKey === 'size') {
+            // 라벨이 없어도 크기는 단면 중심 기준 B×H fallback이 동작할 수 있음
+            let best = null;
+            let bestS = Infinity;
+            for (let i = 0; i < hits.length; i++) {
+              const c = hits[i];
+              if (!c) continue;
+              if (beamFlatBelowTextRole(c.text)) continue;
+              const txt = String(c.text || '').trim();
+              if (!txt || !beamFlatIsSectionBxHSizeText(txt)) continue;
+              const dx = Number.isFinite(Number(c.dx)) ? Math.abs(Number(c.dx)) : Infinity;
+              const dy = Number.isFinite(Number(c.dy)) ? Math.abs(Number(c.dy)) : Infinity;
+              const s = dx * 0.22 + dy * 0.04 + (Number(c.score) || 0) * 0.001;
+              if (s < bestS) {
+                bestS = s;
+                best = c;
+              }
+            }
+            if (best) {
+              lines.push(
+                '    - fallback best="' +
+                  String(best.text || '') +
+                  '" dx=' +
+                  Math.round(Number(best.dx) || 0) +
+                  ' dy=' +
+                  Math.round(Number(best.dy) || 0) +
+                  ' isBxH=' +
+                  (beamFlatIsSectionBxHSizeText(String(best.text || '')) ? 'Y' : 'N'),
+              );
+            }
+          }
+          return;
+        }
+        const cur = rowLabels[idx];
+        const next = idx + 1 < rowLabels.length ? rowLabels[idx + 1] : null;
+        const picked = debugPickValueInRowBand(hits, (belowPack && belowPack.dir) || dir, cur.lb, next && next.lb, roleKey);
+        if (!picked.best) {
+          lines.push('  - [' + roleName + '] 값 후보 없음(행 밴드 조건 통과 0)');
+          return;
+        }
+        const txt = String(picked.best.hit && picked.best.hit.text ? picked.best.hit.text : '');
+        lines.push(
+          '  - [' +
+            roleName +
+            '] best="' +
+            txt +
+            '" dxSigned=' +
+            Math.round(picked.best.dxSigned) +
+            ' dy=' +
+            Math.round(picked.best.dy) +
+            ' score=' +
+            picked.best.score.toFixed(2) +
+            (roleKey === 'size' ? ' isBxH=' + (beamFlatIsSectionBxHSizeText(txt) ? 'Y' : 'N') : ''),
+        );
+        if (roleKey === 'size' && !beamFlatIsSectionBxHSizeText(txt)) {
+          lines.push('    - NOTE: 크기 행의 best 후보가 B×H 형식이 아니라서 크기 연결이 실패할 수 있습니다.');
+        }
+        for (let ii = 1; ii < picked.top.length; ii++) {
+          const c = picked.top[ii];
+          const t2 = String(c.hit && c.hit.text ? c.hit.text : '');
+          lines.push(
+            '    - alt' +
+              (ii + 1) +
+              ' "' +
+              t2 +
+              '" dxSigned=' +
+              Math.round(c.dxSigned) +
+              ' dy=' +
+              Math.round(c.dy) +
+              ' score=' +
+              c.score.toFixed(2),
+          );
+        }
+      }
+
+      diagRow('size', '크기');
+      diagRow('top', '상부근');
+
+      // 원본 hits 상위 일부 덤프(역할 라벨 표시)
+      const dump = hits
+        .slice()
+        .sort(function (a, b) {
+          return (Number(a.score) || 0) - (Number(b.score) || 0);
+        })
+        .slice(0, 24);
+      for (let k = 0; k < dump.length; k++) {
+        const h = dump[k] || {};
+        const role = beamFlatBelowTextRole(h.text) || '';
+        const flags = (h.dimByObj ? ' DIMOBJ' : '') + (h.dimByText ? ' DIMTXT' : '');
+        lines.push(
+          '  - hit' +
+            (k + 1) +
+            (role ? ' [' + role + ']' : '') +
+            ' "' +
+            String(h.text || '') +
+            '" @(' +
+            Math.round(Number(h.x) || 0) +
+            ',' +
+            Math.round(Number(h.y) || 0) +
+            ') dx=' +
+            Math.round(Number(h.dx) || 0) +
+            ' dy=' +
+            Math.round(Number(h.dy) || 0) +
+            ' sc=' +
+            Number(h.score || 0).toFixed(1) +
+            (flags ? ' ' + flags.trim() : ''),
+        );
+      }
+      lines.push('');
+    }
+
+    const plain = lines.join('\n');
+    window.__lastBeamFlatBelowHitsRawDebugPlain = plain;
+    pre.textContent = plain;
+    if (btn) btn.disabled = !plain;
+  }
+
+  function fillBeamFlatSegFilterDebug() {
+    const wrap = $('beamFlatSegFilterDebugWrap');
+    const pre = $('beamFlatSegFilterDebugPre');
+    const btn = $('btnBeamFlatSegFilterCopy');
+    if (!wrap || !pre) return;
+    if (activeExtractTabKey() !== 'beam') {
+      wrap.style.display = 'none';
+      pre.textContent = '';
+      window.__lastBeamFlatSegFilterDebugPlain = '';
+      if (btn) btn.disabled = true;
+      return;
+    }
+    const runB = lastRunByCategory.beam;
+    if (runB && (!Array.isArray(runB.beam_flat_merged_section_analysis) || !runB.beam_flat_merged_section_analysis.length)) {
+      beamFlatEnsureMergedSectionAnalysis(runB);
+    }
+    const arr = runB && Array.isArray(runB.beam_flat_merged_section_analysis) ? runB.beam_flat_merged_section_analysis : [];
+    wrap.style.display = 'block';
+    if (!runB) {
+      const msg = '[보 flat 선분(묶임/제외) 디버그]\n- 보 추출 실행 전입니다.';
+      window.__lastBeamFlatSegFilterDebugPlain = msg;
+      pre.textContent = msg;
+      if (btn) btn.disabled = false;
+      return;
+    }
+    if (!arr.length) {
+      const msg =
+        '[보 flat 선분(묶임/제외) 디버그]\n' +
+        '- flat 단면 분석 데이터가 아직 없습니다.\n' +
+        '- 단면 오버레이가 켜진 상태에서 캔버스를 한 번 갱신(줌/팬/선택)하면 값이 채워집니다.';
+      window.__lastBeamFlatSegFilterDebugPlain = msg;
+      pre.textContent = msg;
+      if (btn) btn.disabled = false;
+      return;
+    }
+    const lines = [];
+    lines.push('[보 flat 선분(묶임/제외) 디버그]');
+    for (let i = 0; i < arr.length; i++) {
+      const pl = arr[i] || {};
+      const segIn = pl.seg_in_bbox_count != null ? Number(pl.seg_in_bbox_count) : 0;
+      const segInH = pl.seg_in_bbox_h != null ? Number(pl.seg_in_bbox_h) : 0;
+      const segInV = pl.seg_in_bbox_v != null ? Number(pl.seg_in_bbox_v) : 0;
+      const ns = pl.near_seg_debug || {};
+      const nearKeep = ns.keep != null ? Number(ns.keep) : 0;
+      const nearH = ns.keep_h != null ? Number(ns.keep_h) : 0;
+      const nearV = ns.keep_v != null ? Number(ns.keep_v) : 0;
+      const candH = ns.cand_h != null ? Number(ns.cand_h) : 0;
+      const candV = ns.cand_v != null ? Number(ns.cand_v) : 0;
+      const rejOv = ns.rej_overlap != null ? Number(ns.rej_overlap) : 0;
+      const rejLong = ns.rej_long_straight != null ? Number(ns.rej_long_straight) : 0;
+      lines.push(
+        '#' +
+          (i + 1) +
+          ' bbox_in=' +
+          segIn +
+          ' (H=' +
+          segInH +
+          ', V=' +
+          segInV +
+          ')' +
+          ' | near_keep=' +
+          nearKeep +
+          ' (H=' +
+          nearH +
+          ', V=' +
+          nearV +
+          ')' +
+          ' cand(H/V)=' +
+          candH +
+          '/' +
+          candV +
+          ' rej(overlap/longStraight)=' +
+          rejOv +
+          '/' +
+          rejLong,
+      );
+      if (ns.maxHorzRun != null || ns.maxVertRun != null) {
+        lines.push(
+          '  - filter: maxHorzRun=' +
+            (ns.maxHorzRun != null ? Number(ns.maxHorzRun).toFixed(1) : '-') +
+            ' maxVertRun=' +
+            (ns.maxVertRun != null ? Number(ns.maxVertRun).toFixed(1) : '-') +
+            ' minOverlap=' +
+            (ns.minOverlap != null ? Number(ns.minOverlap).toFixed(3) : '-') +
+            ' pad=' +
+            (ns.pad != null ? Number(ns.pad) : '-') +
+            ' padTop=' +
+            (ns.padTop != null ? Number(ns.padTop).toFixed(1) : '-') +
+            ' coreW=' +
+            (ns.coreW != null ? Number(ns.coreW).toFixed(1) : '-') +
+            ' coreH=' +
+            (ns.coreH != null ? Number(ns.coreH).toFixed(1) : '-') +
+            ' coreSlack=' +
+            (ns.coreSlack != null ? Number(ns.coreSlack).toFixed(1) : '-'),
+        );
+      }
+    }
+    const plain = lines.join('\n');
+    window.__lastBeamFlatSegFilterDebugPlain = plain;
     pre.textContent = plain;
     if (btn) btn.disabled = !plain;
   }
@@ -4189,8 +4720,9 @@
   }
 
   /**
-   * 우측「부재별 표」(보·가로 Y묶음). Name = 단면 search 박스 라벨과 동일(`picked`·부재명 삽입점 우선).
-   * 세로 스트립+폴리라인일 때는 `beam_vertical_member_zone_match_lines` 우선(`beamCanvasMemberNameForMemberTable`).
+   * 우측「부재별 표」(보·가로 Y묶음).
+   * 1순위: 서버 `validation.beam_flat_member_table_rows`(flat 단면·슬랩·하단텍스트).
+   * 보조: 브라우저 `beam_flat_merged_section_analysis`·픽된 연결선.
    */
   function renderBeamHorizontalMemberTableHtml(run) {
     const v = run.validation || {};
@@ -4198,6 +4730,8 @@
     const dup = new Set(v.duplicate_row_indices || []);
     const strips = v.beam_vertical_strips || [];
     const labMap = buildPreviewLabelEidMap();
+    const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
+
     function beamFlatAnalysisForRow(rowIndex) {
       const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
       if (!arr.length) return null;
@@ -4230,11 +4764,16 @@
     function beamFlatTextValuesForRow(pl) {
       const rv = (pl && pl.below_text_role_values) || {};
       const chain = Array.isArray(pl && pl.below_text_chain_values) ? pl.below_text_chain_values : [];
+      let skinStr = String(rv['표피철근'] || '').trim();
+      if (!skinStr && chain.length >= 4) {
+        const c3 = String(chain[3] || '').trim();
+        if (c3 && !beamFlatLooksLikeMemberMarkText(c3) && beamFlatLooksLikeRebarValueText(c3)) skinStr = c3;
+      }
       return {
         top: String(rv['상부근'] || chain[0] || '').trim(),
         bot: String(rv['하부근'] || chain[1] || '').trim(),
         stir: String(rv['스트럽'] || chain[2] || '').trim(),
-        skin: String(rv['표피철근'] || chain[3] || '').trim(),
+        skin: skinStr,
       };
     }
     const th = [
@@ -4256,53 +4795,112 @@
       'Side Bar',
       'Strip X',
     ];
-    let html =
-      '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">Name·행 클릭: <strong>단면 박스 라벨</strong>(부재명·부위·존) 및 가로 연결선과 동일 출처(<code>getCachedBeamHorizontalMatch</code> → <code>picked</code>).</p>';
+    let html = '';
+    if (serverFlatRows.length) {
+      html +=
+        '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">부재별 표는 서버 <strong>flat 단일 경로</strong> 결과(<code>beam_flat_member_table_rows</code>)를 우선합니다. 행 클릭 시 원본 추출 행(<code>source_row_index</code>)으로 이동합니다.</p>';
+    } else {
+      html +=
+        '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">Name·행 클릭: <strong>단면 박스 라벨</strong>(부재명·부위·존) 및 가로 연결선과 동일 출처(<code>getCachedBeamHorizontalMatch</code> → <code>picked</code>).</p>';
+    }
     html += '<div class="extract-result-table-wrap"><table class="extract-grid extract-member-tidy"><thead><tr>';
     th.forEach((t) => {
       html += '<th>' + escapeHtml(t) + '</th>';
     });
     html += '</tr></thead><tbody>';
-    rows.forEach((r, ri) => {
+
+    function oneRowHtml(opts) {
+      const ri = opts.ri;
+      const r = rows[ri] || {};
       const cls = [dup.has(ri) ? 'extract-dup-row' : '', 'extract-nav-target'].filter(Boolean).join(' ');
-      const sx = formatBeamMergedStripXs(r, strips);
+      const sx = opts.sx != null ? String(opts.sx) : formatBeamMergedStripXs(r, strips);
       const z = (x) => (x != null && x !== '' ? String(x) : '');
       const zb = (key, val) => escapeHtml(formatBeamExtractDisplay(key, val));
-      const nameCell = beamCanvasMemberNameForMemberTable(run, ri, labMap);
       const flatPl = beamFlatAnalysisForRow(ri);
-      const flatTx = beamFlatTextValuesForRow(flatPl);
-      const widthCell =
-        flatPl && Number.isFinite(Number(flatPl.width_world))
-          ? String(Math.round(Number(flatPl.width_world)))
-          : z(r.width_mm);
-      const depthCell =
-        flatPl && Number.isFinite(Number(flatPl.height_world))
-          ? String(Math.round(Number(flatPl.height_world)))
-          : z(r.depth_mm);
+      const flatTxBr = beamFlatTextValuesForRow(flatPl);
+      const flatTx = {
+        top: String(opts.flatTxSrv.top || flatTxBr.top || '').trim(),
+        bot: String(opts.flatTxSrv.bot || flatTxBr.bot || '').trim(),
+        stir: String(opts.flatTxSrv.stir || flatTxBr.stir || '').trim(),
+        skin: String(opts.flatTxSrv.skin || flatTxBr.skin || '').trim(),
+      };
+      let widthCell = z(opts.widthMm);
+      let depthCell = z(opts.depthMm);
+      if (flatPl && Number.isFinite(Number(flatPl.width_world)) && !widthCell) {
+        widthCell = String(Math.round(Number(flatPl.width_world)));
+      }
+      if (flatPl && Number.isFinite(Number(flatPl.height_world)) && !depthCell) {
+        depthCell = String(Math.round(Number(flatPl.height_world)));
+      }
       const topBarCell = flatTx.top || z(r.int_top_bar);
       const botBarCell = flatTx.bot || z(r.int_bot_bar);
       const stirCell = flatTx.stir || z(r.int_stirrup_bar);
       const sideCell = flatTx.skin || z(r.side_bar);
-      html += '<tr class="' + cls + '" data-extract-nav-row="' + ri + '">';
-      html += '<td class="num">' + (ri + 1) + '</td>';
-      html += '<td>' + escapeHtml(nameCell) + '</td>';
-      html += '<td>' + escapeHtml(z(r.type)) + '</td>';
-      html += '<td>' + escapeHtml(z(r.material)) + '</td>';
-      html += '<td>' + escapeHtml(widthCell) + '</td>';
-      html += '<td>' + escapeHtml(depthCell) + '</td>';
-      html += '<td>' + escapeHtml(topBarCell) + '</td>';
-      html += '<td>' + zb('cen_top_bar', r.cen_top_bar) + '</td>';
-      html += '<td>' + zb('ext_top_bar', r.ext_top_bar) + '</td>';
-      html += '<td>' + escapeHtml(botBarCell) + '</td>';
-      html += '<td>' + zb('cen_bot_bar', r.cen_bot_bar) + '</td>';
-      html += '<td>' + zb('ext_bot_bar', r.ext_bot_bar) + '</td>';
-      html += '<td>' + escapeHtml(stirCell) + '</td>';
-      html += '<td>' + zb('cen_stirrup_bar', r.cen_stirrup_bar) + '</td>';
-      html += '<td>' + zb('ext_stirrup_bar', r.ext_stirrup_bar) + '</td>';
-      html += '<td>' + escapeHtml(sideCell) + '</td>';
-      html += '<td>' + escapeHtml(sx) + '</td>';
-      html += '</tr>';
-    });
+      const nameCell = opts.nameCell;
+      const rowNum = opts.rowNum;
+      let h = '';
+      h += '<tr class="' + cls + '" data-extract-nav-row="' + ri + '">';
+      h += '<td class="num">' + rowNum + '</td>';
+      h += '<td>' + escapeHtml(nameCell) + '</td>';
+      h += '<td>' + escapeHtml(z(r.type)) + '</td>';
+      h += '<td>' + escapeHtml(z(r.material)) + '</td>';
+      h += '<td>' + escapeHtml(widthCell) + '</td>';
+      h += '<td>' + escapeHtml(depthCell) + '</td>';
+      h += '<td>' + escapeHtml(topBarCell) + '</td>';
+      h += '<td>' + zb('cen_top_bar', r.cen_top_bar) + '</td>';
+      h += '<td>' + zb('ext_top_bar', r.ext_top_bar) + '</td>';
+      h += '<td>' + escapeHtml(botBarCell) + '</td>';
+      h += '<td>' + zb('cen_bot_bar', r.cen_bot_bar) + '</td>';
+      h += '<td>' + zb('ext_bot_bar', r.ext_bot_bar) + '</td>';
+      h += '<td>' + escapeHtml(stirCell) + '</td>';
+      h += '<td>' + zb('cen_stirrup_bar', r.cen_stirrup_bar) + '</td>';
+      h += '<td>' + zb('ext_stirrup_bar', r.ext_stirrup_bar) + '</td>';
+      h += '<td>' + escapeHtml(sideCell) + '</td>';
+      h += '<td>' + escapeHtml(sx) + '</td>';
+      h += '</tr>';
+      return h;
+    }
+
+    if (serverFlatRows.length) {
+      serverFlatRows.forEach(function (fr, ii) {
+        const srcRi = Number(fr.source_row_index);
+        const ri = Number.isFinite(srcRi) ? srcRi : ii;
+        const r = rows[ri] || {};
+        const srvPl = {
+          below_text_role_values: fr.below_text_role_values,
+          below_text_chain_values: fr.below_text_chain_values,
+        };
+        const flatTxSrv = beamFlatTextValuesForRow(srvPl);
+        const nm = String(fr.member_mark_text || '').trim();
+        const zn = String(fr.member_zone_text || '').trim();
+        let nameCell = [nm, zn].filter(Boolean).join(' · ');
+        if (!nameCell) nameCell = beamCanvasMemberNameForMemberTable(run, ri, labMap);
+        html += oneRowHtml({
+          ri: ri,
+          rowNum: ii + 1,
+          nameCell: nameCell,
+          widthMm: fr.width_mm,
+          depthMm: fr.depth_mm,
+          flatTxSrv: flatTxSrv,
+          sx: fr.strip_x,
+        });
+      });
+    } else {
+      rows.forEach((r, ri) => {
+        const nameCell = beamCanvasMemberNameForMemberTable(run, ri, labMap);
+        const flatPl = beamFlatAnalysisForRow(ri);
+        const flatTxSrv = beamFlatTextValuesForRow(flatPl);
+        html += oneRowHtml({
+          ri: ri,
+          rowNum: ri + 1,
+          nameCell: nameCell,
+          widthMm: r.width_mm,
+          depthMm: r.depth_mm,
+          flatTxSrv: flatTxSrv,
+          sx: null,
+        });
+      });
+    }
     html += '</tbody></table></div>';
     return html;
   }
@@ -4703,6 +5301,7 @@
     for (let i = 0; i < previewData.vectors.length; i++) {
       const v = previewData.vectors[i];
       if (!v || String(v.etype || '').toUpperCase() !== 'CIRCLE') continue;
+      if (v.from_dimension === true) continue;
       let cx = null;
       let cy = null;
       if (isFiniteBBox4(v.bb)) {
@@ -4969,13 +5568,16 @@
     return (
       v.beam_vertical_blocks === true ||
       v.beam_row_cluster_bundle === true ||
+      (Array.isArray(v.beam_row_clusters) && v.beam_row_clusters.length > 0) ||
       (Array.isArray(v.beam_vertical_strips) && v.beam_vertical_strips.length > 0) ||
       (Array.isArray(v.beam_vertical_member_zone_match_lines) && v.beam_vertical_member_zone_match_lines.length > 0)
     );
   }
 
-  /** 서버 `beam_layout_resolved` 가 flat 인지(가로 일람·스트립 없음) */
+  /** 서버가 flat 단면 경로를 탔는지(표 레이아웃 문자열과 무관하게 branch=flat) */
   function beamLayoutResolvedFlat(v) {
+    if (!v) return false;
+    if (String(v.beam_section_geo_branch || '').trim().toLowerCase() === 'flat') return true;
     return String((v && v.beam_layout_resolved) || '').trim().toLowerCase() === 'flat';
   }
 
@@ -5154,6 +5756,158 @@
     head.style.display = showMemberExports ? 'none' : '';
   }
 
+  /** 추출 헤더(디버그 복사 버튼 줄) 바로 아래 — 서버가 어떤 읽기 경로를 탔는지 요약 */
+  function fillExtractIllamReadPathCard(run) {
+    const el = $('extractIllamReadPathCard');
+    if (!el) return;
+    if (!run) {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
+    const cat = String(run.category || activeExtractTabKey() || '').toLowerCase();
+    const v = run.validation || {};
+    const esc = escapeHtml;
+
+    function beamConceptsDetails() {
+      return (
+        '<details class="extract-read-path-concepts">' +
+        '<summary>보 추출 방식이 여러 가지인 이유 (쉽게)</summary>' +
+        '<p>도면마다 일람표가 다릅니다. 어떤 도면은 <strong>한 줄에 넓게</strong> 펼쳐져 있고(와이드), 어떤 도면은 <strong>세로로 두 덩어리</strong>(왼쪽 제목·오른쪽 칸)로 나 있으며, 또 어떤 도면은 <strong>표 제목이 거의 없어서</strong> 같은 높이의 글자만으로 줄을 묶어야 합니다.</p>' +
+        '<p>프로그램은 위에서부터 순서대로 「와이드/트리 표 → 행 묶음 번들 → flat 폴백」처럼 <strong>맞아 보이는 형식 하나를 고릅니다</strong>. 그때 서버가 기록하는 이름이 <code>beam_layout_resolved</code> 입니다.</p>' +
+        '<p><strong>Flat</strong>은 표 형식을 확실히 못 잡았을 때의 단순 모드에 가깝고, 캔버스에서 <strong>원(CIRCLE)을 모아 상·하로 색만 나누는 디버그 오버레이</strong>는 주로 이 모드에서 돌아갑니다. 반대로 <strong>행 묶음 번들·와이드</strong>일 때는 서버가 단면 박스·스트립을 중심으로 그립니다.</p>' +
+        '</details>'
+      );
+    }
+
+    let title = '이번 실행 · 읽기 방식';
+    let headline = '';
+    let body = '';
+    let codeLine = '';
+    let concepts = '';
+
+    if (cat === 'beam') {
+      concepts = beamConceptsDetails();
+      const resolvedRaw = v.beam_layout_resolved != null ? String(v.beam_layout_resolved).trim() : '';
+      const resolved = resolvedRaw.toLowerCase();
+      const vert = v.beam_vertical_blocks === true;
+      const bundle = v.beam_row_cluster_bundle === true;
+      const wideTree = v.beam_wide_or_tree === true;
+
+      codeLine =
+        'beam_layout_resolved=' +
+        esc(resolvedRaw || '-') +
+        ' · beam_vertical_blocks=' +
+        String(vert) +
+        ' · beam_row_cluster_bundle=' +
+        String(bundle) +
+        ' · beam_wide_or_tree=' +
+        String(wideTree);
+
+      if (vert) {
+        headline = '세로 블록 일람(좌 제목 · 우 데이터)';
+        body =
+          '<p class="extract-read-path-lead"><strong>판정:</strong> 왼쪽에 행 제목(부호·상부근·하부근 등), 오른쪽에 열별 데이터가 있는 <strong>세로형 표</strong>로 보았습니다.</p>' +
+          '<ul>' +
+          '<li>열(스트립)마다 단면·철근 분석이 붙습니다.</li>' +
+          '<li>캔버스 오버레이는 스트립 위치·부재→부위→단면 매칭선·서버 단면 박스 중심입니다.</li>' +
+          '</ul>';
+      } else if (wideTree) {
+        if (resolved === 'horizontal_wide') {
+          headline = '가로 와이드 표';
+          body =
+            '<p class="extract-read-path-lead"><strong>판정:</strong> 한 줄에 칸이 넓게 이어진 <strong>와이드형 보 일람</strong>으로 인식했습니다.</p>' +
+            '<ul><li>열 헤더·셀 구조를 기준으로 필드를 읽습니다.</li></ul>';
+        } else if (resolved === 'horizontal_location_tree') {
+          headline = 'Location 트리 형 표';
+          body =
+            '<p class="extract-read-path-lead"><strong>판정:</strong> Location 등 <strong>트리형 헤더</strong> 구조로 보았습니다.</p>' +
+            '<ul><li>와이드와 비슷하게 가로 표 로직을 탑니다.</li></ul>';
+        } else {
+          headline = '가로 표 (와이드·트리류)';
+          body =
+            '<p class="extract-read-path-lead"><strong>판정:</strong> 가로 방향 일람 표(와이드 또는 트리)로 읽었습니다.</p>' +
+            '<ul><li>상세 코드는 아래 <code>beam_layout_resolved</code>를 보세요.</li></ul>';
+        }
+      } else if (bundle || resolved === 'row_cluster_bundle') {
+        headline = '행 묶음 번들';
+        body =
+          '<p class="extract-read-path-lead"><strong>판정:</strong> 표 헤더가 약하거나 특이해서, <strong>같은 줄(Y)</strong>로 묶인 텍스트와 「부호가 나오는 줄」부터 이어지는 블록으로 부재를 나눴습니다.</p>' +
+          '<ul>' +
+          '<li>세로 블록처럼 좌·우 전체를 나누지 않고, 행 띠(R0,R1…)·부재 블록 단위로 단면을 찾습니다.</li>' +
+          '<li>캔버스의 원 상·하 색 분리(flat 전용 클라이언트 분석)는 보통 이 경로에서는 기대하지 않습니다.</li>' +
+          '</ul>';
+      } else if (resolved === 'flat' || beamLayoutResolvedFlat(v)) {
+        headline = 'Flat 가로 일람 (폴백)';
+        body =
+          '<p class="extract-read-path-lead"><strong>판정:</strong> 와이드·행 번들 등으로 표 형식을 확정하지 못했거나, 설정상 flat만 해당할 때의 <strong>단순 가로 모드</strong>입니다.</p>' +
+          '<ul>' +
+          '<li>줄 단위로만 묶인 행에서 값을 읽습니다.</li>' +
+          '<li>도면에 CIRCLE이 있으면 캔버스에서 원을 모아 클러스터하고, 단면 무게중심 기준 <strong>상부(주황)·하부(보라)</strong>로 나누는 오버레이가 여기서 주로 맞습니다.</li>' +
+          '</ul>';
+      } else {
+        headline = resolvedRaw ? '보 · ' + resolvedRaw : '보 추출';
+        body =
+          '<p class="extract-read-path-lead"><strong>판정:</strong> 서버가 선택한 형식 코드는 아래와 같습니다. 요약 한 줄에도 같은 정보가 반복됩니다.</p>' +
+          '<ul><li>표 형식이 바뀌면 이 값도 바뀝니다.</li></ul>';
+      }
+    } else if (cat === 'column') {
+      title = '이번 실행 · 기둥 읽기 방식';
+      if (v.column_vertical_blocks) {
+        headline = '세로 블록 기둥표';
+        body =
+          '<p class="extract-read-path-lead"><strong>판정:</strong> 좌측 행 라벨·우측 스트립 데이터 형태로 읽었습니다.</p>' +
+          '<ul><li>단면 오버레이는 스트립·열 구분선 중심입니다.</li></ul>';
+      } else {
+        headline = '기둥 가로 표';
+        body =
+          '<p class="extract-read-path-lead"><strong>판정:</strong> 가로 표(피벗·행 단위) 쪽으로 처리했습니다.</p>' +
+          '<ul><li><code>column_layout</code>·피벗 여부는 요약 줄과 디버그 패널을 참고하세요.</li></ul>';
+      }
+      codeLine =
+        'column_vertical_blocks=' +
+        String(!!v.column_vertical_blocks) +
+        (v.column_layout ? ' · column_layout=' + esc(String(v.column_layout)) : '');
+      concepts =
+        '<details class="extract-read-path-concepts">' +
+        '<summary>기둥도 표마다 다르게 읽습니다</summary>' +
+        '<p><strong>세로 블록</strong>은 도면에서 흔한 「왼쪽에 행 이름, 오른쪽에 칸」 표에 맞춘 모드입니다. <strong>가로 표</strong>는 한 줄에 부호와 여러 칸이 나란히 있는 형태에 가깝습니다.</p>' +
+        '</details>';
+    } else if (cat === 'wall') {
+      title = '이번 실행 · 벽체 읽기';
+      headline = '벽체 일람';
+      body =
+        '<p class="extract-read-path-lead"><strong>판정:</strong> 벽체 카테고리 기본 규칙으로 텍스트 행을 읽었습니다.</p>';
+      codeLine = 'category=wall';
+    } else if (cat === 'slab') {
+      title = '이번 실행 · 슬라브 읽기';
+      headline = '슬라브 일람';
+      body =
+        '<p class="extract-read-path-lead"><strong>판정:</strong> 슬라브 카테고리 기본 규칙으로 텍스트 행을 읽었습니다.</p>';
+      codeLine = 'category=slab';
+    } else {
+      title = '이번 실행 · 읽기 방식';
+      headline = cat ? esc(cat) : '알 수 없음';
+      body = '<p class="extract-read-path-lead">분류 키를 확인할 수 없습니다.</p>';
+      codeLine = '';
+    }
+
+    let html =
+      '<h4>' +
+      esc(title) +
+      '</h4>' +
+      '<p class="extract-read-path-lead"><strong>' +
+      esc(headline) +
+      '</strong></p>';
+    html += body;
+    if (codeLine) {
+      html += '<div class="extract-read-path-code">' + codeLine + '</div>';
+    }
+    html += concepts || '';
+    el.innerHTML = html;
+    el.style.display = 'block';
+  }
+
   function fillExtractColumnVerticalDebugOutside(run) {
     const dw = $('extractDebugPanelWrap');
     const dh = $('extractDebugPanelHost');
@@ -5182,10 +5936,15 @@
     const ph = $('extractPivotPreExcelHost');
     const dw = $('extractDebugPanelWrap');
     const dh = $('extractDebugPanelHost');
+    const readPath = $('extractIllamReadPathCard');
     const head = $('extractHeadExportToolbar');
     const copyTop = $('btnExtractDebugCopyTop');
     if (head) head.style.display = '';
     if (copyTop) copyTop.style.display = 'none';
+    if (readPath) {
+      readPath.style.display = 'none';
+      readPath.innerHTML = '';
+    }
     if (eh) {
       eh.style.display = 'none';
       eh.innerHTML = '';
@@ -5239,21 +5998,21 @@
       if (v && v.column_vertical_blocks && rows && rows.length) {
         mb.style.display = 'block';
         mh.innerHTML = renderColumnVerticalMemberTableHtml(run);
-      } else if (v && beamValidationPolyNav(v) && rows && rows.length) {
-        mb.style.display = 'block';
-        mh.innerHTML = renderBeamVerticalMemberTableHtml(run);
       } else if (
         run &&
         run.category === 'beam' &&
         v &&
-        !beamValidationPolyNav(v) &&
         rows &&
         rows.length &&
         Array.isArray(v.beam_row_clusters) &&
         v.beam_row_clusters.length
       ) {
+        /* 가로 Y묶음(번들·flat 공통): 서버 flat 단면 + beam_flat_member_table_rows 기준 표 */
         mb.style.display = 'block';
         mh.innerHTML = renderBeamHorizontalMemberTableHtml(run);
+      } else if (v && beamValidationPolyNav(v) && rows && rows.length) {
+        mb.style.display = 'block';
+        mh.innerHTML = renderBeamVerticalMemberTableHtml(run);
       } else {
         mb.style.display = 'none';
         mh.innerHTML = '';
@@ -5372,11 +6131,15 @@
     window.__lastBeamRowClusterDebugPlain = '';
     window.__lastBeamReadPipelineDebugPlain = '';
     window.__lastBeamFlatBelowMatchDebugPlain = '';
+    window.__lastBeamFlatBelowHitsRawDebugPlain = '';
+    window.__lastBeamFlatSegFilterDebugPlain = '';
     if (!run) {
       clearExtractAuxHosts();
       fillBeamRowClusterDebugPanel(null);
       fillBeamReadPipelineDebugPanel(null);
       fillBeamFlatBelowMatchDebug();
+      fillBeamFlatBelowHitsRawDebug();
+      fillBeamFlatSegFilterDebug();
       const tk = activeExtractTabKey();
       const tabLab = { beam: '보', column: '기둥', wall: '벽체', slab: '슬라브' }[tk] || '이';
       if (sumEl) sumEl.textContent = '[' + tabLab + '] 아직 추출 결과가 없습니다.';
@@ -5415,10 +6178,13 @@
       if (v.warning) parts.push('경고: ' + v.warning);
       sumEl.textContent = parts.join(' · ');
     }
+    fillExtractIllamReadPathCard(run);
     fillBeamRowClusterDebugPanel(run);
     fillBeamReadPipelineDebugPanel(run);
     renderExtractAuxPanels(run);
     fillBeamFlatBelowMatchDebug();
+    fillBeamFlatBelowHitsRawDebug();
+    fillBeamFlatSegFilterDebug();
     const vRun = run.validation || {};
     if (vRun.column_vertical_blocks) {
       if (!rows.length) {
@@ -6206,10 +6972,13 @@
       const run = lastRunByCategory.beam;
       if (!run || !run.validation) return;
       const vb = run.validation;
-      if (
-        vb.beam_vertical_blocks !== true &&
-        (!Array.isArray(vb.beam_vertical_strips) || !vb.beam_vertical_strips.length)
-      ) {
+      const stripLike =
+        vb.beam_vertical_blocks === true ||
+        (Array.isArray(vb.beam_vertical_strips) && vb.beam_vertical_strips.length > 0);
+      const rowClusterLike =
+        vb.beam_row_cluster_bundle === true ||
+        (Array.isArray(vb.beam_row_clusters) && vb.beam_row_clusters.length > 0);
+      if (!stripLike && !rowClusterLike) {
         return;
       }
       strips = vb.beam_vertical_strips;
@@ -6412,7 +7181,7 @@
       const T = (texts || []).join(' ').replace(/\s+/g, ' ').trim();
       if (!T) return '';
       if (/형\s*태|단면\s*도|SECTION/i.test(T)) return 'section';
-      if (/INT\.|ALL\.|^\s*ALL\s*$|CENTER|END\s*\(|BOTH|\bEXT\b|EXTERIOR|외단|외측/i.test(T)) return 'zone';
+      if (/INT\.|ALL\.|^\s*ALL\s*$|CENTER|\bEXT\b|EXTERIOR|END\s*\(|BOTH/i.test(T)) return 'zone';
       if (/\bRG\d|\bBX\d|[A-Z]{1,3}\s*\d{1,4}[A-Z]?\s*\(\s*\d{3,4}/i.test(T)) return 'mark';
       if (/^\s*[A-Z]{1,3}\s*\d{1,4}[A-Z]?\s*(?:\(.+\))?\s*$/i.test(T) && /\d/.test(T)) return 'mark';
       return '';
@@ -6423,7 +7192,8 @@
     ctx.setLineDash([]);
 
     if (m && Array.isArray(m.picked) && m.picked.length) {
-      for (let pi = 0; !flatMode && pi < m.picked.length; pi++) {
+      // 기존 프론트 규칙(picked)을 flat에서도 그대로 표시해야 한다.
+      for (let pi = 0; pi < m.picked.length; pi++) {
         const p = m.picked[pi];
         const mem = p.member;
         const zon = p.zone;
@@ -6471,6 +7241,8 @@
         }
       }
 
+      // 기존 프론트 결과(memberZoneLines/picked)를 “정답”으로 유지한다.
+      // 서버 승격 결과는 별도 디버그/비교용으로만 사용(여기서는 대체하지 않음).
       const mzSrc =
         Array.isArray(m.memberZoneLines) && m.memberZoneLines.length
           ? m.memberZoneLines
@@ -6506,11 +7278,6 @@
         ctx.moveTo(pM[0], pM[1]);
         ctx.lineTo(pZ[0], pZ[1]);
         ctx.stroke();
-      }
-
-      if (flatMode) {
-        ctx.restore();
-        return;
       }
 
       if (Array.isArray(m.zoneSectionLines) && m.zoneSectionLines.length) {
@@ -6589,16 +7356,13 @@
       return !!(s && markRe.test(s) && /\d/.test(s));
     }
     function zoneKey(t) {
-      const raw = String(t || '').trim();
-      if (!raw) return '';
-      const s = raw.toUpperCase().replace(/\s+/g, '');
+      const s = String(t || '').toUpperCase().replace(/\s+/g, '');
       if (!s) return '';
-      // EXT는 "TEXT" 등에 부분 문자열로만 들어가는 경우가 있어 단어 경계·한글 표기로만 인식
-      if (raw.indexOf('외단') >= 0 || raw.indexOf('외측') >= 0) return 'EXT';
-      if (/\bEXT\b/i.test(raw) || /\bEXTERIOR\b/i.test(raw)) return 'EXT';
       if (s.indexOf('INT') >= 0) return 'INT';
       if (s.indexOf('CENTER') >= 0 || s === 'CEN' || s.indexOf('CEN') === 0) return 'CENTER';
       if (s.indexOf('ALL') >= 0) return 'ALL';
+      // EXT는 END('단부' 등)보다 먼저 — 'EXTENDED'에 'END'가 부분문자열로 들어가 오인될 수 있음
+      if (s.indexOf('EXT') >= 0 || s.indexOf('EXTERIOR') >= 0) return 'EXT';
       if (s.indexOf('END') >= 0) return 'END';
       return '';
     }
@@ -6729,7 +7493,7 @@
       return dy + dx * 0.25;
     }
 
-    // --- A) 부호 행 ↔ 부위(INT/CENTER/EXT/ALL/END). Y축이 위가 큰 도면 / 반대 도면 모두: 평균 Y로 방향 잡고, 없으면 반대로 재시도.
+    // --- A) 부호 행 ↔ 부위(INT/CENTER/ALL/EXT/END). Y축이 위가 큰 도면 / 반대 도면 모두: 평균 Y로 방향 잡고, 없으면 반대로 재시도.
     function pickBestMark(z, lockedMarkEids) {
       function scanOne(preferAbove) {
         let best = null;
@@ -6908,7 +7672,7 @@
     if (/^-?\d+(\.\d+)?$/.test(s)) return false;
     if (/\d+\s*[-/]\s*(U?HD|SHD|D)\d/i.test(s)) return false;
     if (/^(RC|SOM|BY\s*STORY)$/i.test(s)) return false;
-    if (/^INT\.|^(ALL|CENTER|END)\b/i.test(s) && !/\bRG|[A-Z]{2,3}\d/i.test(s)) return false;
+      if (/^INT\.|^(ALL|CENTER|END|EXT)\b/i.test(s) && !/\bRG|[A-Z]{2,3}\d/i.test(s)) return false;
     if (/^\d{2,4}$/.test(s)) return false;
     if (!/[A-Za-z가-힣]/.test(s)) return false;
     if (/\b(stirrup|concrete|width|depth|type|name|mark|material)\b/i.test(s)) return false;
@@ -7777,6 +8541,7 @@
     for (let i = 0; i < previewData.vectors.length; i++) {
       const v = previewData.vectors[i];
       if (!v || String(v.etype || '').toUpperCase() !== 'CIRCLE') continue;
+      if (v.from_dimension === true) continue;
       let cx = null;
       let cy = null;
       let r = null;
@@ -7805,6 +8570,7 @@
     for (let i = 0; i < previewData.vectors.length; i++) {
       const v = previewData.vectors[i];
       if (!v || !Array.isArray(v.path) || v.path.length < 2) continue;
+      if (v.from_dimension === true) continue;
       const et = String(v.etype || '').toUpperCase();
       if (et === 'CIRCLE' || et === 'ARC' || et === 'TEXT' || et === 'MTEXT' || et === 'ATTRIB') continue;
       for (let j = 0; j < v.path.length - 1; j++) {
@@ -7819,7 +8585,8 @@
         const dx = x1 - x0;
         const dy = y1 - y0;
         const len = Math.sqrt(dx * dx + dy * dy);
-        if (len < 90) continue;
+        // 짧은 선도 단면(특히 밑면/모서리) 후보에 필요할 수 있어 최소 길이 컷을 거의 제거
+        if (len < 6) continue;
         if (Math.abs(dy) > Math.max(6, len * 0.035)) continue;
         const sx0 = Math.min(x0, x1);
         const sx1 = Math.max(x0, x1);
@@ -7833,6 +8600,34 @@
     return out;
   }
 
+  /** 폴리라인 path 내 '꺾임' 횟수(대략). 직선(0) vs 꺾인 선(>=1) 판별용 */
+  function beamPathBendCount(path) {
+    if (!Array.isArray(path) || path.length < 3) return 0;
+    function segOrient(a, b) {
+      if (!Array.isArray(a) || !Array.isArray(b) || a.length < 2 || b.length < 2) return 'O';
+      const x0 = Number(a[0]);
+      const y0 = Number(a[1]);
+      const x1 = Number(b[0]);
+      const y1 = Number(b[1]);
+      if (![x0, y0, x1, y1].every(Number.isFinite)) return 'O';
+      const dx = x1 - x0;
+      const dy = y1 - y0;
+      const len = Math.sqrt(dx * dx + dy * dy);
+      if (len < 8) return 'O';
+      if (Math.abs(dy) <= Math.max(6, len * 0.035)) return 'H';
+      if (Math.abs(dx) <= Math.max(6, len * 0.035)) return 'V';
+      return 'O';
+    }
+    let bends = 0;
+    let last = segOrient(path[0], path[1]);
+    for (let i = 1; i < path.length - 1; i++) {
+      const cur = segOrient(path[i], path[i + 1]);
+      if (cur !== 'O' && last !== 'O' && cur !== last) bends++;
+      if (cur !== 'O') last = cur;
+    }
+    return bends;
+  }
+
   function collectPreviewOrthogonalSegmentsForBeamFlat(runB) {
     if (!previewData || !Array.isArray(previewData.vectors)) return [];
     const clips = beamFlatSelectionClipBboxes(runB);
@@ -7840,6 +8635,8 @@
     for (let i = 0; i < previewData.vectors.length; i++) {
       const v = previewData.vectors[i];
       if (!v || !Array.isArray(v.path) || v.path.length < 2) continue;
+      if (v.from_dimension === true) continue;
+      const bendCount = beamPathBendCount(v.path);
       const et = String(v.etype || '').toUpperCase();
       if (et === 'CIRCLE' || et === 'ARC' || et === 'TEXT' || et === 'MTEXT' || et === 'ATTRIB') continue;
       for (let j = 0; j < v.path.length - 1; j++) {
@@ -7854,7 +8651,8 @@
         const dx = x1 - x0;
         const dy = y1 - y0;
         const len = Math.sqrt(dx * dx + dy * dy);
-        if (len < 40) continue;
+        // 짧은 직교선도 단면 후보에 필요할 수 있어 최소 길이 컷을 거의 제거
+        if (len < 6) continue;
         const isH = Math.abs(dy) <= Math.max(6, len * 0.035);
         const isV = Math.abs(dx) <= Math.max(6, len * 0.035);
         if (!isH && !isV) continue;
@@ -7874,6 +8672,7 @@
           yB: y1,
           len: len,
           orient: isH ? 'H' : 'V',
+          bendCount: bendCount,
           layer: v.layer || '',
           eid: v.eid,
         });
@@ -7893,6 +8692,8 @@
     for (let i = 0; i < previewData.vectors.length; i++) {
       const v = previewData.vectors[i];
       if (!v || !Array.isArray(v.path) || v.path.length < 2) continue;
+      if (v.from_dimension === true) continue;
+      const bendCount = beamPathBendCount(v.path);
       const et = String(v.etype || '').toUpperCase();
       if (et === 'CIRCLE' || et === 'ARC' || et === 'TEXT' || et === 'MTEXT' || et === 'ATTRIB') continue;
       for (let j = 0; j < v.path.length - 1; j++) {
@@ -7907,10 +8708,13 @@
         const dx = x1 - x0;
         const dy = y1 - y0;
         const len = Math.sqrt(dx * dx + dy * dy);
-        if (len < 40) continue;
+        // 너무 짧은 선은 노이즈라 제외하되, 이전보다 완화
+        if (len < 10) continue;
         const adx = Math.abs(dx);
         const ady = Math.abs(dy);
-        const verticalDominant = adx <= ady * 1.08 && ady >= Math.max(10, len * 0.065);
+        /* 수직에 가까운 선만(사선·스터럽 약경사는 별도); 45° 근처는 제외 */
+        const verticalDominant =
+          adx <= ady * 0.48 && ady >= Math.max(14, len * 0.72);
         if (!verticalDominant) continue;
         const mx = (x0 + x1) * 0.5;
         const my = (y0 + y1) * 0.5;
@@ -7928,6 +8732,7 @@
           yB: y1,
           len: len,
           orient: 'V',
+          bendCount: bendCount,
           layer: v.layer || '',
           eid: v.eid,
         });
@@ -7936,33 +8741,193 @@
     return out;
   }
 
-  function beamFlatNearbySegmentsForCluster(cluster, segments) {
+  function beamFlatNearbySegmentsForCluster(cluster, segments, statsOut) {
     const bb = cluster && cluster.bbox;
     if (!isFiniteBBox4(bb) || !Array.isArray(segments)) return [];
     const x0 = Math.min(Number(bb[0]), Number(bb[2]));
     const y0 = Math.min(Number(bb[1]), Number(bb[3]));
     const x1 = Math.max(Number(bb[0]), Number(bb[2]));
     const y1 = Math.max(Number(bb[1]), Number(bb[3]));
-    const pad = 72;
-    const minOverlap = 0.35;
+    /* 수평선: CAD Y↑=상단 이므로 상부 스터럽·상부근 바깥(위쪽) 가로 가이드까지 비대칭으로 허용 */
+    const cw = Math.max(1, x1 - x0);
+    const ch = Math.max(1, y1 - y0);
+    const pad = 112;
+    const padBot = pad;
+    /* 상부근만 있는 좁은 bbox(ch 작음)라도 단면·치수 위쪽 긴 가로선까지 잡히도록 상단만 크게 연장 */
+    const padTopExtra = Math.max(160, Math.min(620, ch * 1.05 + 190));
+    const padTop = pad + padTopExtra;
+    /* 주근 뭉치 bbox가 매우 작을 때 겹침·길이 필터가 과하게 빡세지 않도록 코어 박스를 확장 */
+    const coreSlack = Math.max(36, Math.min(136, (cw + ch) * 0.24 + 26));
+    let x0c = x0 - coreSlack;
+    let x1c = x1 + coreSlack;
+    let y0c = y0 - coreSlack;
+    let y1c = y1 + coreSlack;
+    /* 원이 2개 등으로 bbox가 좁으면 단면 외곽(상단 가로선)이 겹침 0으로 탈락할 수 있어 최소 코어 폭/높이를 강제 */
+    const cx = (x0c + x1c) * 0.5;
+    const cy = (y0c + y1c) * 0.5;
+    const coreW0 = Math.max(1, x1c - x0c);
+    const coreH0 = Math.max(1, y1c - y0c);
+    const minCoreW = Math.max(coreW0, 360, cw * 2.2 + 140);
+    const minCoreH = Math.max(coreH0, 280, ch * 2.45 + 140);
+    if (minCoreW > coreW0) {
+      x0c = cx - minCoreW * 0.5;
+      x1c = cx + minCoreW * 0.5;
+    }
+    if (minCoreH > coreH0) {
+      y0c = cy - minCoreH * 0.5;
+      y1c = cy + minCoreH * 0.5;
+    }
+    const coreW = Math.max(1, x1c - x0c);
+    const coreH = Math.max(1, y1c - y0c);
+    /* 주근 뭉치 bbox 대비 과도하게 긴 가이드선(배치용 긴 직선) 제외 — 클러스터가 너무 작으면 하한을 충분히 올림 */
+    const rawMaxVert = ch * 2.65 + cw * 1.05 + 130;
+    const rawMaxHorz = cw * 2.65 + ch * 1.05 + 130;
+    const longStraightFloor = Math.max(560, (cw + ch) * 1.05 + 180, Math.max(cw, ch) * 2.55 + 120);
+    const maxVertRun = Math.min(14000, Math.max(rawMaxVert, longStraightFloor));
+    /* 폭이 단면 폭보다 긴 상·하단 가로 지시선: 작은 원-only bbox에서도 cw 기준으로 하한 상향 */
+    const horzRunWidthFloor = Math.max(
+      cw * 3.65 + Math.min(420, ch * 0.85 + 140),
+      cw * 4.85 + ch * 2.6 + 240,
+      1180,
+    );
+    const maxHorzRun = Math.min(14000, Math.max(rawMaxHorz, longStraightFloor, horzRunWidthFloor));
+    /* 겹침 비율 완화 + 긴 전역선은 비율만으로 탈락시키지 않도록 절대 겹침(px) 보조 통과 */
+    const minOverlap = 0.095;
     const found = [];
+    const st =
+      statsOut && typeof statsOut === 'object'
+        ? statsOut
+        : null;
+    function inc(k) {
+      if (!st) return;
+      st[k] = (Number(st[k]) || 0) + 1;
+    }
+    function overlapPassH(ov, need) {
+      const ratio = need > 0 ? ov / need : 0;
+      if (ratio >= minOverlap) return true;
+      const minOvPx = Math.max(14, coreW * 0.045);
+      /* 도면 전체 폭으로 길게 깔린 가로선: need≈코어폭+패드로 상한 → 부분 겹침만 있어도 저비율 통과 */
+      if (ov >= minOvPx && ratio >= 0.022) return true;
+      const coreSpanPad = x1c - x0c + pad * 2;
+      if (need >= coreSpanPad * 0.92 && ov >= Math.max(18, coreW * 0.028)) return ratio >= 0.006;
+      if (ov >= 16 && ratio >= 0.008) return true;
+      return false;
+    }
+    function overlapPassV(ov, need) {
+      const ratio = need > 0 ? ov / need : 0;
+      if (ratio >= minOverlap) return true;
+      const minOvPx = Math.max(16, coreH * 0.055);
+      return ov >= minOvPx && ratio >= 0.022;
+    }
     segments.forEach(function (s) {
       if (!s) return;
       if (s.orient === 'H') {
-        if (s.y0 < y0 - pad || s.y0 > y1 + pad) return;
-        const ov = Math.max(0, Math.min(x1 + pad, s.x1) - Math.max(x0 - pad, s.x0));
-        const need = Math.max(1, Math.min(x1 - x0 + pad * 2, s.x1 - s.x0));
-        if (ov / need < minOverlap) return;
+        inc('cand_h');
+        const hy = (Number(s.y0) + Number(s.y1)) * 0.5;
+        if (!Number.isFinite(hy) || hy < y0c - padBot || hy > y1c + padTop) return;
+        const ov = Math.max(0, Math.min(x1c + pad, s.x1) - Math.max(x0c - pad, s.x0));
+        const need = Math.max(1, Math.min(x1c - x0c + pad * 2, s.x1 - s.x0));
+        if (!overlapPassH(ov, need)) {
+          inc('rej_overlap');
+          return;
+        }
+        const hRun = Number(s.len) || Math.abs(Number(s.xB) - Number(s.xA));
+        // "꺾인 폴리라인"은 단면 형상이 길어도 유지. 직선(꺾임 0)만 긴 가이드선 제거.
+        if ((Number(s.bendCount) || 0) === 0 && Number.isFinite(hRun) && hRun > maxHorzRun) {
+          inc('rej_long_straight');
+          return;
+        }
         found.push(s);
+        inc('keep');
+        inc('keep_h');
       } else if (s.orient === 'V') {
-        if (s.x0 < x0 - pad || s.x0 > x1 + pad) return;
-        const ov = Math.max(0, Math.min(y1 + pad, s.y1) - Math.max(y0 - pad, s.y0));
-        const need = Math.max(1, Math.min(y1 - y0 + pad * 2, s.y1 - s.y0));
-        if (ov / need < minOverlap) return;
+        inc('cand_v');
+        if (s.x0 < x0c - padBot || s.x0 > x1c + padBot) return;
+        const ov = Math.max(0, Math.min(y1c + pad, s.y1) - Math.max(y0c - pad, s.y0));
+        const need = Math.max(1, Math.min(y1c - y0c + pad * 2, s.y1 - s.y0));
+        if (!overlapPassV(ov, need)) {
+          inc('rej_overlap');
+          return;
+        }
+        const vRun = Number(s.len) || Math.abs(Number(s.yB) - Number(s.yA));
+        // 직선(꺾임 0)만 긴 가이드선 제거.
+        if ((Number(s.bendCount) || 0) === 0 && Number.isFinite(vRun) && vRun > maxVertRun) {
+          inc('rej_long_straight');
+          return;
+        }
         found.push(s);
+        inc('keep');
+        inc('keep_v');
       }
     });
+    if (st) {
+      st.maxVertRun = maxVertRun;
+      st.maxHorzRun = maxHorzRun;
+      st.minOverlap = minOverlap;
+      st.pad = pad;
+      st.padTop = padTop;
+      st.coreSlack = coreSlack;
+      st.coreW = coreW;
+      st.coreH = coreH;
+    }
     return found;
+  }
+
+  function beamFlatCollectNearSegStatsForMergedGroup(g, metaRows) {
+    const st = {
+      cand_h: 0,
+      cand_v: 0,
+      keep: 0,
+      keep_h: 0,
+      keep_v: 0,
+      rej_overlap: 0,
+      rej_long_straight: 0,
+      maxVertRun: null,
+      maxHorzRun: null,
+      minOverlap: null,
+      pad: null,
+      padTop: null,
+      coreSlack: null,
+      coreW: null,
+      coreH: null,
+    };
+    let filled = false;
+    (g && g.indices ? g.indices : []).forEach(function (ii) {
+      const row = metaRows && metaRows[ii] ? metaRows[ii] : null;
+      const r = row && row.nearSegStats ? row.nearSegStats : null;
+      if (!r) return;
+      ['cand_h', 'cand_v', 'keep', 'keep_h', 'keep_v', 'rej_overlap', 'rej_long_straight'].forEach(function (k) {
+        st[k] += Number(r[k]) || 0;
+      });
+      if (!filled) {
+        if (r.maxVertRun != null) st.maxVertRun = r.maxVertRun;
+        if (r.maxHorzRun != null) st.maxHorzRun = r.maxHorzRun;
+        if (r.minOverlap != null) st.minOverlap = r.minOverlap;
+        if (r.pad != null) st.pad = r.pad;
+        filled = true;
+      }
+      const cs = Number(r.coreSlack);
+      if (Number.isFinite(cs)) {
+        if (!Number.isFinite(Number(st.coreSlack))) st.coreSlack = cs;
+        else st.coreSlack = Math.max(Number(st.coreSlack), cs);
+      }
+      const pt = Number(r.padTop);
+      if (Number.isFinite(pt)) {
+        if (!Number.isFinite(Number(st.padTop))) st.padTop = pt;
+        else st.padTop = Math.max(Number(st.padTop), pt);
+      }
+      const cW = Number(r.coreW);
+      if (Number.isFinite(cW)) {
+        if (!Number.isFinite(Number(st.coreW))) st.coreW = cW;
+        else st.coreW = Math.max(Number(st.coreW), cW);
+      }
+      const cH = Number(r.coreH);
+      if (Number.isFinite(cH)) {
+        if (!Number.isFinite(Number(st.coreH))) st.coreH = cH;
+        else st.coreH = Math.max(Number(st.coreH), cH);
+      }
+    });
+    return st;
   }
 
   function bboxFromBeamFlatSegments(segs) {
@@ -7996,6 +8961,35 @@
     return beamWorldBBoxIntersectionArea(a, b) > 0;
   }
 
+  /** 겹치지 않아도 같은 단면일 가능성: X가 많이 겹치고 Y 간격이 적당하면 병합 */
+  function beamFlatWorldBboxesCloseEnoughToMerge(a, b) {
+    if (!isFiniteBBox4(a) || !isFiniteBBox4(b)) return false;
+    const ax0 = Math.min(Number(a[0]), Number(a[2]));
+    const ax1 = Math.max(Number(a[0]), Number(a[2]));
+    const ay0 = Math.min(Number(a[1]), Number(a[3]));
+    const ay1 = Math.max(Number(a[1]), Number(a[3]));
+    const bx0 = Math.min(Number(b[0]), Number(b[2]));
+    const bx1 = Math.max(Number(b[0]), Number(b[2]));
+    const by0 = Math.min(Number(b[1]), Number(b[3]));
+    const by1 = Math.max(Number(b[1]), Number(b[3]));
+    if (![ax0, ax1, ay0, ay1, bx0, bx1, by0, by1].every(Number.isFinite)) return false;
+    const aw = Math.max(1, ax1 - ax0);
+    const bw = Math.max(1, bx1 - bx0);
+    const ah = Math.max(1, ay1 - ay0);
+    const bh = Math.max(1, by1 - by0);
+    const ovX = Math.max(0, Math.min(ax1, bx1) - Math.max(ax0, bx0));
+    const ovXRel = ovX / Math.max(1, Math.min(aw, bw));
+    if (ovXRel < 0.68) return false;
+    const gapY = ay0 > by1 ? (ay0 - by1) : by0 > ay1 ? (by0 - ay1) : 0;
+    const yTol = Math.max(240, Math.min(1600, (ah + bh) * 8.0));
+    if (gapY > yTol) return false;
+    const acx = (ax0 + ax1) * 0.5;
+    const bcx = (bx0 + bx1) * 0.5;
+    const cxTol = Math.max(90, Math.min(900, Math.max(aw, bw) * 0.35));
+    if (Math.abs(acx - bcx) > cxTol) return false;
+    return true;
+  }
+
   /** 겹치는 bbox들을 transitively 묶어 각 그룹의 합집합 bbox + 메타 반환 */
   function beamFlatMergeOverlappingUnitBboxes(metaRows) {
     const rows = Array.isArray(metaRows) ? metaRows : [];
@@ -8022,7 +9016,7 @@
       for (let j = i + 1; j < n; j++) {
         const bj = rows[j] && rows[j].unitBb;
         if (!isFiniteBBox4(bj)) continue;
-        if (beamFlatWorldBboxesOverlap(bi, bj)) unite(i, j);
+        if (beamFlatWorldBboxesOverlap(bi, bj) || beamFlatWorldBboxesCloseEnoughToMerge(bi, bj)) unite(i, j);
       }
     }
     const buckets = {};
@@ -8207,14 +9201,24 @@
 
     if (pl.below_text_role_values && typeof pl.below_text_role_values === 'object') {
       const rv = pl.below_text_role_values;
-      const readLines = [];
-      if (rv['상부근']) readLines.push('상부근(읽음): ' + rv['상부근']);
-      if (rv['하부근']) readLines.push('하부근(읽음): ' + rv['하부근']);
-      if (rv['스트럽']) readLines.push('스트럽(읽음): ' + rv['스트럽']);
-      if (rv['표피철근']) readLines.push('표피철근(읽음): ' + rv['표피철근']);
-      if (readLines.length) {
+      const sizeLine = rv['크기'] ? '크기(읽음): ' + rv['크기'] : '';
+      const rebarLines = [];
+      if (rv['상부근']) rebarLines.push('상부근(읽음): ' + rv['상부근']);
+      if (rv['하부근']) rebarLines.push('하부근(읽음): ' + rv['하부근']);
+      if (rv['스트럽']) rebarLines.push('스트럽(읽음): ' + rv['스트럽']);
+      if (rv['상부근'] || rv['하부근'] || rv['스트럽'] || rv['표피철근'] || rv['크기']) {
+        rebarLines.push('표피철근(읽음): ' + (rv['표피철근'] ? rv['표피철근'] : '없음'));
+      }
+      if (sizeLine || rebarLines.length) {
         lines.push('----- 텍스트 읽음 -----');
-        for (let i = 0; i < readLines.length; i++) lines.push(readLines[i]);
+        if (sizeLine) {
+          lines.push('----- 크기(텍스트) -----');
+          lines.push(sizeLine);
+        }
+        if (rebarLines.length) {
+          lines.push('----- 철근·표피(텍스트) -----');
+          for (let i = 0; i < rebarLines.length; i++) lines.push(rebarLines[i]);
+        }
       }
     }
     if (Array.isArray(pl.below_text_chain_values) && pl.below_text_chain_values.length) {
@@ -8245,7 +9249,7 @@
   function beamFlatCollectTextsBelowSectionCenter(secX, secY, normBboxOpt) {
     const lbs = (previewData && previewData.labels) || [];
     const SECTION_BELOW_MAX_DY = 3600;
-    const SECTION_BELOW_MAX_DX = 1800;
+    const SECTION_BELOW_MAX_DX = 2400;
     const nb = normBboxOpt && beamFlatNormSectionBBox(normBboxOpt);
     function collectOne(isDownSmallY) {
       const out = [];
@@ -8304,6 +9308,7 @@
   function beamFlatBelowTextRole(t) {
     const s = String(t || '').replace(/\s+/g, '');
     if (!s) return '';
+    if (s.indexOf('크기') >= 0 || s.indexOf('규격') >= 0) return 'size';
     if (s.indexOf('상부근') >= 0 || s.indexOf('상단근') >= 0) return 'top';
     if (s.indexOf('하부근') >= 0 || s.indexOf('하단근') >= 0) return 'bot';
     if (s.indexOf('스트럽') >= 0 || s.indexOf('스터럽') >= 0 || s.indexOf('띠근') >= 0) return 'stirrup';
@@ -8320,7 +9325,7 @@
     if (/[±]/.test(s)) return true;
     if (/\bR\d+(\.\d+)?\b/i.test(s)) return true;
     if (/[ØΦφ]/.test(s)) return true;
-    if (/\d+\s*[x×]\s*\d+/.test(s) && !hasRebarMark) return true;
+    if (/\d+\s*[x×X]\s*\d+/.test(s) && !hasRebarMark) return true;
     // 도면에서 '@'는 철근 배근 표기(예: 4-SHD13@100)인 경우가 많아 치수로 보지 않는다.
     if (/^\d+\s*-\s*\d+$/.test(s)) return true;
     if (/\b(mm|cm|m)\b/i.test(s)) return true;
@@ -8338,6 +9343,346 @@
     if (/\d+\s*\/\s*\d+\s*-\s*(U?HD|SHD|D)\s*\d+/.test(s)) return true;
     if (/(U?HD|SHD|D)\s*\d+/.test(s) && /\d/.test(s)) return true;
     return false;
+  }
+
+  /** 단면 크기 한 줄(B×H 등) — x·×·X(대문자) 모두 허용 (예: 400 X 600) */
+  function beamFlatIsSectionBxHSizeText(t) {
+    const s = String(t || '').replace(/\s+/g, ' ').trim();
+    if (!s || s.length > 52) return false;
+    if (beamFlatLooksLikeRebarValueText(s)) return false;
+    const core = s.replace(/\b(mm|cm|m)\b/gi, '').trim();
+    return /\d{2,5}\s*[x×X]\s*\d{2,5}/.test(core);
+  }
+
+  /** 라벨 없이도 단면별로 가장 그럴듯한 B×H 1개 선택 (refX 기준 dx가 가장 작은 것 우선) */
+  function beamFlatPickSizeBxHFromBelowHits(hits) {
+    let best = null;
+    let bestS = Infinity;
+    for (let i = 0; i < (hits || []).length; i++) {
+      const c = hits[i];
+      if (!c) continue;
+      if (beamFlatBelowTextRole(c.text)) continue;
+      const txt = String(c.text || '').trim();
+      if (!txt || !beamFlatIsSectionBxHSizeText(txt)) continue;
+      const dx = Number.isFinite(Number(c.dx)) ? Math.abs(Number(c.dx)) : Infinity;
+      const dy = Number.isFinite(Number(c.dy)) ? Math.abs(Number(c.dy)) : Infinity;
+      const s = dx * 0.22 + dy * 0.04 + (Number(c.score) || 0) * 0.001;
+      if (s < bestS) {
+        bestS = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  /** 단면 하단 가로띠(y≈y0)에만 깔린 B×H — 부위 열과 x가 어긋나도 단면 폭 안쪽이면 후보 */
+  function beamFlatFindBxHOnHorizontalSizeStrip(nb, topLbl, hits, dir) {
+    if (!nb || !topLbl || !Array.isArray(hits)) return null;
+    const isDownSmallY = String(dir || 'smallY') !== 'largeY';
+    function downAxis(y) {
+      return isDownSmallY ? -Number(y) : Number(y);
+    }
+    const yEdge = Number(nb.y0);
+    const yTol = 58;
+    const dEdge = downAxis(yEdge);
+    const dLb = downAxis(Number(topLbl.y));
+    const lo = Math.min(dEdge, dLb) + 1;
+    const hi = Math.max(dEdge, dLb) - 1;
+    if (!(hi - lo > 2)) return null;
+    const bw = Math.max(1, Number(nb.x1) - Number(nb.x0));
+    const xMid = (Number(nb.x0) + Number(nb.x1)) * 0.5;
+    const xPad = Math.max(160, Math.min(620, bw * 0.62 + 140));
+    let best = null;
+    let bestS = Infinity;
+    for (let i = 0; i < hits.length; i++) {
+      const c = hits[i];
+      if (!c || c === topLbl) continue;
+      const raw = String(c.text || '').trim();
+      if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
+      if (beamFlatBelowTextRole(raw)) continue;
+      const tx = Number(c.x);
+      const ty = Number(c.y);
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      if (Math.abs(ty - yEdge) > yTol) continue;
+      const dc = downAxis(ty);
+      if (dc <= lo || dc >= hi) continue;
+      if (tx < Number(nb.x0) - xPad || tx > Number(nb.x1) + xPad) continue;
+      const s = Math.abs(tx - xMid) * 0.85 + Math.abs(ty - yEdge) * 2.4;
+      if (s < bestS) {
+        bestS = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  /** 단면 bbox 하단(y0)과 `상부근` 라벨 사이 세로 밴드 — 크기(B×H)가 표 제목 위가 아니라 단면·상부근 사이에 있을 때 */
+  function beamFlatFindBxHBetweenSectionAndTopLabel(nb, topLbl, hits, dir, alignX) {
+    if (!nb || !topLbl || !Array.isArray(hits)) return null;
+    const isDownSmallY = String(dir || 'smallY') !== 'largeY';
+    function downAxis(y) {
+      return isDownSmallY ? -Number(y) : Number(y);
+    }
+    const dEdge = downAxis(Number(nb.y0));
+    const dLb = downAxis(Number(topLbl.y));
+    const lo = Math.min(dEdge, dLb) + 2;
+    const hi = Math.max(dEdge, dLb) - 2;
+    if (!(hi - lo > 2)) return null;
+    const ax = Number.isFinite(Number(alignX)) ? Number(alignX) : (Number(nb.x0) + Number(nb.x1)) * 0.5;
+    let best = null;
+    let bestS = Infinity;
+    for (let i = 0; i < hits.length; i++) {
+      const c = hits[i];
+      if (!c || c === topLbl) continue;
+      const raw = String(c.text || '').trim();
+      if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
+      if (beamFlatBelowTextRole(raw)) continue;
+      const tx = Number(c.x);
+      const ty = Number(c.y);
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      const dc = downAxis(ty);
+      if (dc <= lo || dc >= hi) continue;
+      const dx = Math.abs(tx - ax);
+      if (dx > 680) continue;
+      const mid = (lo + hi) * 0.5;
+      const s = Math.abs(dc - mid) + dx * 0.032;
+      if (s < bestS) {
+        bestS = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  /** 부재명→부위 가지처럼 단면 왼쪽에 크기만 한 줄 있는 패턴 */
+  function beamFlatFindBxHMemberStubColumn(nb, topLbl, hits, dir) {
+    if (!nb || !topLbl || !Array.isArray(hits)) return null;
+    const isDownSmallY = String(dir || 'smallY') !== 'largeY';
+    function downAxis(y) {
+      return isDownSmallY ? -Number(y) : Number(y);
+    }
+    const dEdge = downAxis(Number(nb.y0));
+    const dLb = downAxis(Number(topLbl.y));
+    const lo = Math.min(dEdge, dLb) + 2;
+    const hi = Math.max(dEdge, dLb) - 2;
+    if (!(hi - lo > 2)) return null;
+    const xLim = Math.min(Number(nb.x0), Number(topLbl.x)) + 58;
+    let best = null;
+    let bestS = Infinity;
+    for (let i = 0; i < hits.length; i++) {
+      const c = hits[i];
+      if (!c || c === topLbl) continue;
+      const raw = String(c.text || '').trim();
+      if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
+      if (beamFlatBelowTextRole(raw)) continue;
+      const tx = Number(c.x);
+      const ty = Number(c.y);
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      if (tx > xLim) continue;
+      const dc = downAxis(ty);
+      if (dc <= lo || dc >= hi) continue;
+      const xPrefer = Number(nb.x0) - 90;
+      const s = Math.abs(tx - xPrefer) + Math.abs(dc - (lo + hi) * 0.5) * 0.018;
+      if (s < bestS) {
+        bestS = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  /** `상부근` 행 제목보다 위쪽 밴드(보조) — 단면~라벨·왼쪽 가지에서 못 찾을 때만 */
+  function beamFlatFindBxHAboveTopRebarLabel(labelHit, hits, dir, alignHit) {
+    if (!labelHit || !Array.isArray(hits)) return null;
+    const isDownSmallY = String(dir || 'smallY') !== 'largeY';
+    function downAxis(y) {
+      return isDownSmallY ? -Number(y) : Number(y);
+    }
+    const ax = Number((alignHit && alignHit.x) != null ? alignHit.x : labelHit.x);
+    const ayLb = Number(labelHit.y);
+    if (!Number.isFinite(ax) || !Number.isFinite(ayLb)) return null;
+    const dLb = downAxis(ayLb);
+    const minGap = 2;
+    const maxSpan = 280;
+    let best = null;
+    let bestS = Infinity;
+    for (let i = 0; i < hits.length; i++) {
+      const c = hits[i];
+      if (!c || c === labelHit) continue;
+      const raw = String(c.text || '').trim();
+      if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
+      if (beamFlatBelowTextRole(raw)) continue;
+      const tx = Number(c.x);
+      const ty = Number(c.y);
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      const dc = downAxis(ty);
+      if (!(dc < dLb - minGap && dc > dLb - maxSpan)) continue;
+      const dx = Math.abs(tx - ax);
+      if (dx > 280) continue;
+      const s = (dLb - dc) * 1.02 + dx * 0.035;
+      if (s < bestS) {
+        bestS = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  /**
+   * 단면 하단~상부근 라벨 사이 공통 B×H — 부재명보다 아래(y)에 오고 x는 부재 열과 많이 어긋날 수 있음(쌍단면 등).
+   * markAnchorY 있으면 부재 텍스트보다 아래쪽 행만 후보로 삼는다.
+   */
+  function beamFlatFindBxHNearMemberMarkX(nb, topLbl, hits, dir, markAnchorX, markAnchorY) {
+    if (!nb || !topLbl || !Array.isArray(hits)) return null;
+    const mx = Number(markAnchorX);
+    if (!Number.isFinite(mx)) return null;
+    const myMem = Number(markAnchorY);
+    const isDownSmallY = String(dir || 'smallY') !== 'largeY';
+    function downAxis(y) {
+      return isDownSmallY ? -Number(y) : Number(y);
+    }
+    const dEdge = downAxis(Number(nb.y0));
+    const dLb = downAxis(Number(topLbl.y));
+    const lo = Math.min(dEdge, dLb) + 2;
+    const hi = Math.max(dEdge, dLb) - 2;
+    if (!(hi - lo > 2)) return null;
+    const xMid = (Number(nb.x0) + Number(nb.x1)) * 0.5;
+    const bw = Math.max(1, Number(nb.x1) - Number(nb.x0));
+    /* 단면 폭·병렬 단면까지 고려해 x 허용 확대 — 부재명과 크기 텍스트 x가 많이 달라도 같은 세로 흐름이면 인정 */
+    const maxDxMark = Math.min(2600, Math.max(1050, bw * 1.85 + 420));
+    let best = null;
+    let bestS = Infinity;
+    for (let i = 0; i < hits.length; i++) {
+      const c = hits[i];
+      if (!c || c === topLbl) continue;
+      const raw = String(c.text || '').trim();
+      if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
+      if (beamFlatBelowTextRole(raw)) continue;
+      const tx = Number(c.x);
+      const ty = Number(c.y);
+      if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
+      if (Number.isFinite(myMem)) {
+        if (isDownSmallY) {
+          if (!(ty < myMem - 6)) continue;
+        } else {
+          if (!(ty > myMem + 6)) continue;
+        }
+      }
+      const dc = downAxis(ty);
+      if (dc <= lo || dc >= hi) continue;
+      const dxMark = Math.abs(tx - mx);
+      if (dxMark > maxDxMark) continue;
+      const mid = (lo + hi) * 0.5;
+      const dxSec = Math.abs(tx - xMid);
+      /* 세로 밴드 안 맞춤을 우선, 부재 x는 느슨하게(가중 작음) */
+      const s = Math.abs(dc - mid) * 1.12 + dxMark * 0.045 + dxSec * 0.01;
+      if (s < bestS) {
+        bestS = s;
+        best = c;
+      }
+    }
+    return best;
+  }
+
+  /** 상부근 값 셀에 B×H가 한 줄로 붙어 있으면 크기는 별도 hit로 두고, 표시·역할맵에는 철근만 남긴다. */
+  function beamFlatTopRebarDisplayHit(topValHit, sizeHitOpt) {
+    if (!topValHit) return null;
+    const raw = String(topValHit.text || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return topValHit;
+    if (sizeHitOpt) {
+      const sz = String(sizeHitOpt.text || '').replace(/\s+/g, ' ').trim();
+      if (sz && beamFlatIsSectionBxHSizeText(sz)) {
+        const rawC = raw.replace(/\s/g, '');
+        const szC = sz.replace(/\s/g, '').toUpperCase();
+        if (rawC.toUpperCase().indexOf(szC) === 0) {
+          let ic = 0;
+          let cut = 0;
+          for (let jp = 0; jp < raw.length && ic < szC.length; jp++) {
+            const ch = raw[jp];
+            if (/\s/.test(ch)) {
+              cut = jp + 1;
+              continue;
+            }
+            if (String(ch).toUpperCase() !== szC.charAt(ic)) break;
+            ic++;
+            cut = jp + 1;
+          }
+          if (ic === szC.length) {
+            let rest = raw.slice(cut).replace(/^[·\s\-/|]+/, '').trim();
+            if (rest && beamFlatLooksLikeRebarValueText(rest)) return Object.assign({}, topValHit, { text: rest });
+          }
+        }
+      }
+    }
+    const m = raw.match(/^(\d{2,5}\s*[x×X]\s*\d{2,5})(\s*(mm|cm|m))?\s*([·|/\\-]\s*)?(.*)$/i);
+    if (m && m[5]) {
+      const rest = String(m[5]).trim();
+      if (rest && beamFlatLooksLikeRebarValueText(rest)) return Object.assign({}, topValHit, { text: rest });
+    }
+    return topValHit;
+  }
+
+  /** 부호·부재명(RG…, GB1 등) — 표피철근 값으로 오인되지 않게 구분 */
+  function beamFlatLooksLikeMemberMarkText(t) {
+    const s0 = String(t || '').replace(/\s+/g, ' ').trim();
+    if (!s0) return false;
+    if (beamFlatLooksLikeRebarValueText(s0)) return false;
+    if (beamFlatLooksLikeDimensionText(s0)) return false;
+    const s = s0.replace(/\s+/g, '').toUpperCase();
+    if (/^RG\d/.test(s)) return true;
+    if (/^(GB|WB)\d{1,3}[A-Z]?$/i.test(s0) && s0.length <= 14) return true;
+    if (/^[A-Z]{2,4}\d{1,3}(-(INT|CEN|CENTER|EXT|B|C))?$/i.test(s0) && s0.length <= 22 && !/\d\s*-\s*(U?HD|SHD|D)/i.test(s0))
+      return true;
+    return false;
+  }
+
+  function beamFlatNormMemberMarkKey(t) {
+    return String(t || '')
+      .replace(/\s+/g, '')
+      .replace(/[()]/g, '')
+      .toUpperCase();
+  }
+
+  /** 표피철근: 부재명 오연결 제거 + 연쇄 배열 마지막 칸 정리 (`member_mark_text`는 링크 후에 채워짐) */
+  function beamFlatFinalizeBelowTextSkin(pl) {
+    if (!pl) return;
+    const mkey = beamFlatNormMemberMarkKey(pl.member_mark_text || '');
+    function badSkin(txt) {
+      const raw = String(txt || '').trim();
+      if (!raw) return true;
+      if (mkey && beamFlatNormMemberMarkKey(raw) === mkey) return true;
+      if (beamFlatLooksLikeMemberMarkText(raw)) return true;
+      /* 표피는 철근 배근 문자열만 (치수·부호·잡텍스트 연쇄 오인 제거) */
+      if (!beamFlatLooksLikeRebarValueText(raw)) return true;
+      return false;
+    }
+    const rv = pl.below_text_role_values;
+    if (rv && typeof rv === 'object' && rv['표피철근'] != null && badSkin(rv['표피철근'])) {
+      delete rv['표피철근'];
+    }
+    const ch = pl.below_text_chain_values;
+    if (Array.isArray(ch) && ch.length >= 4 && badSkin(ch[3])) {
+      pl.below_text_chain_values = ch.slice(0, 3);
+    }
+  }
+
+  /** finalize 후 역할 맵·연쇄 배열과 불일치하는 표피 타깃 제거(중심→텍스트 선·디버그 목록) */
+  function beamFlatSyncInfoTargetsAfterSkinFinalize(pl, infoTargets, belowMode) {
+    if (!Array.isArray(infoTargets) || !pl) return infoTargets;
+    if (String(belowMode || '') === 'role') {
+      const v = pl.below_text_role_values || {};
+      const keepSkin = !!(v['표피철근']);
+      return infoTargets.filter(function (t) {
+        if (!t || String(t.role || '') !== '표피철근') return true;
+        return keepSkin;
+      });
+    }
+    const ch = pl.below_text_chain_values || [];
+    const keepSkin = Array.isArray(ch) && ch.length >= 4;
+    return infoTargets.filter(function (t) {
+      if (!t || String(t.role || '') !== '표피철근') return true;
+      return keepSkin;
+    });
   }
 
   function beamFlatIsDimensionLikeLabel(lb) {
@@ -8419,9 +9764,14 @@
   }
 
   /** 역할 라벨(상/하/스트럽/표피) 바로 아래의 값 텍스트를 우선 연결 */
-  function beamFlatPickInfoTextsFromBelowHits(hits, dir) {
+  function beamFlatPickInfoTextsFromBelowHits(hits, dir, sectionOpt) {
+    const sectionNb = sectionOpt && sectionOpt.nb ? sectionOpt.nb : null;
+    const markAnchorX =
+      sectionOpt && Number.isFinite(Number(sectionOpt.markAnchorX)) ? Number(sectionOpt.markAnchorX) : NaN;
+    const markAnchorY =
+      sectionOpt && Number.isFinite(Number(sectionOpt.markAnchorY)) ? Number(sectionOpt.markAnchorY) : NaN;
     const isDownSmallY = String(dir || 'smallY') !== 'largeY';
-    const labelsByRole = { top: [], bot: [], stirrup: [], skin: [] };
+    const labelsByRole = { size: [], top: [], bot: [], stirrup: [], skin: [] };
     (hits || []).forEach(function (h) {
       const role = beamFlatBelowTextRole(h && h.text);
       if (!role) return;
@@ -8437,6 +9787,7 @@
       });
       rows.push({ roleKey: roleKey, roleLabel: roleLabel, lb: labels[0] });
     }
+    pickBestLabel('size', '크기');
     pickBestLabel('top', '상부근');
     pickBestLabel('bot', '하부근');
     pickBestLabel('stirrup', '스트럽');
@@ -8463,7 +9814,11 @@
         const c = hits[i];
         if (!c || c === lb) continue;
         if (beamFlatBelowTextRole(c.text)) continue; // 역할 라벨은 값 후보 제외
-        if (beamFlatLooksLikeDimensionText(c.text)) continue; // 치수선 텍스트 제외
+        // 크기 행은 B×H 자체가 "치수 텍스트"로 분류되므로 예외 허용(다른 행은 기존대로 치수 제외)
+        if (row.roleKey !== 'size' && beamFlatLooksLikeDimensionText(c.text)) continue;
+        if (row.roleKey === 'size' && !beamFlatIsSectionBxHSizeText(String(c.text || ''))) continue;
+        if (row.roleKey === 'skin' && beamFlatLooksLikeMemberMarkText(c.text)) continue;
+        if (row.roleKey === 'skin' && !beamFlatLooksLikeRebarValueText(String(c.text || ''))) continue;
 
         const dc = downAxis(c.y);
         if (!Number.isFinite(dc)) continue;
@@ -8472,10 +9827,20 @@
 
         const dxSigned = Number(c.x) - Number(lb.x);
         if (!Number.isFinite(dxSigned)) continue;
-        if (dxSigned < -120) continue; // 라벨보다 많이 왼쪽은 제외
+        // 크기 행: 라벨(맨 왼쪽) 기준이 아니라 단면 중심(refX) 기준으로 가까운 B×H를 골라야 함
         const dy = Math.abs(Number(c.y) - Number(lb.y));
-        const dx = Math.abs(dxSigned);
-        const s = dy * 1.9 + dx * 0.03 + (dxSigned < 0 ? 12 : 0);
+        let dx = Math.abs(dxSigned);
+        if (row.roleKey === 'size') {
+          // belowHits의 dx는 collect 단계에서 refX(단면 중심) 기준으로 계산됨
+          const dxRef = Number(c.dx);
+          dx = Number.isFinite(dxRef) ? Math.abs(dxRef) : dx;
+        } else {
+          if (dxSigned < -280) continue; // 부위 열 사이 등 x 어긋남 허용(기존 규칙)
+        }
+        const s =
+          row.roleKey === 'size'
+            ? dy * 2.4 + dx * 0.12
+            : dy * 1.9 + dx * 0.017 + (dxSigned < 0 ? 6 : 0);
         if (s < bestS) {
           bestS = s;
           best = c;
@@ -8499,7 +9864,7 @@
         const dd = dc - dBase;
         if (!Number.isFinite(dd) || dd < (minDown || 6) || dd > (maxDown || 620)) continue;
         const dx = Math.abs(Number(c.x) - Number(baseHit.x));
-        if (!Number.isFinite(dx) || dx > 980) continue;
+        if (!Number.isFinite(dx) || dx > 1320) continue;
         const s = dd + dx * 0.08;
         if (s < bestS) {
           bestS = s;
@@ -8516,6 +9881,32 @@
       const next = i + 1 < rows.length ? rows[i + 1] : null;
       seed[row.roleKey] = { row: row, val: pickValueInRowBand(row, next) };
     }
+    // 크기 행이 있으면(라벨 기반) 이 값을 최우선으로 사용
+    if (seed.size && seed.size.val && beamFlatIsSectionBxHSizeText(String(seed.size.val.text || ''))) {
+      seed.top = seed.top || {};
+      seed.top.sizeHit = seed.size.val;
+    }
+    if (seed.top && seed.top.val) {
+      const topLbl = seed.top.row && seed.top.row.lb;
+      const topVal = seed.top.val;
+      let sz = null;
+      if (seed.top && seed.top.sizeHit) {
+        sz = seed.top.sizeHit;
+      } else if (topLbl && sectionNb) {
+        const ax = (Number(topVal.x) + Number(topLbl.x)) * 0.5;
+        sz = beamFlatFindBxHOnHorizontalSizeStrip(sectionNb, topLbl, hits, dir);
+        if (!sz) sz = beamFlatFindBxHBetweenSectionAndTopLabel(sectionNb, topLbl, hits, dir, ax);
+        if (!sz) sz = beamFlatFindBxHMemberStubColumn(sectionNb, topLbl, hits, dir);
+        if (!sz) sz = beamFlatFindBxHAboveTopRebarLabel(topLbl, hits, dir, topVal);
+        if (!sz && Number.isFinite(markAnchorX)) {
+          sz = beamFlatFindBxHNearMemberMarkX(sectionNb, topLbl, hits, dir, markAnchorX, markAnchorY);
+        }
+      } else if (topLbl) {
+        sz = beamFlatFindBxHAboveTopRebarLabel(topLbl, hits, dir, topVal);
+      }
+      seed.top.sizeHit = sz || null;
+      seed.top.displayHit = beamFlatTopRebarDisplayHit(topVal, sz || null);
+    }
 
     // 2) 연쇄: 상부근 값 -> 바로 아래 값(하부근) -> 바로 아래 값(스트럽) -> 바로 아래 값(표피)
     const topStart = (seed.top && (seed.top.val || seed.top.row.lb)) || null;
@@ -8527,7 +9918,16 @@
     function emit(roleKey, roleLabel, chainHit) {
       const s = seed[roleKey] || null;
       const row = s && s.row ? s.row : null;
-      const picked = chainHit || (s && s.val) || (row && row.lb) || null;
+      let picked = null;
+      if (roleKey === 'top' && s && s.displayHit) picked = s.displayHit;
+      else picked = chainHit || (s && s.val) || (row && row.lb) || null;
+      if (roleKey === 'skin') {
+        if (picked && beamFlatLooksLikeMemberMarkText(String(picked.text || ''))) {
+          picked = s && s.val && !beamFlatLooksLikeMemberMarkText(String(s.val.text || '')) ? s.val : null;
+        }
+        if (picked && beamFlatLooksLikeMemberMarkText(String(picked.text || ''))) picked = null;
+        if (picked && !beamFlatLooksLikeRebarValueText(String(picked.text || ''))) picked = null;
+      }
       if (!picked || !row) return;
       out.push({
         role: roleLabel,
@@ -8537,6 +9937,14 @@
       });
     }
     emit('top', '상부근', null);
+    if (seed.top && seed.top.sizeHit) {
+      out.push({
+        role: '크기',
+        hit: seed.top.sizeHit,
+        labelHit: seed.top.row && seed.top.row.lb,
+        fromLabel: true,
+      });
+    }
     emit('bot', '하부근', botChain);
     emit('stirrup', '스트럽', stirChain);
     emit('skin', '표피철근', skinChain);
@@ -8572,7 +9980,7 @@
           // 단면 기준 지역 제한: 전역 수렴 방지
           const dxA = Math.abs(tx - ax);
           const dyA = Math.abs(ty - ay);
-          if (dxA > 950 || dyA > 2600) continue;
+          if (dxA > 1350 || dyA > 2600) continue;
           if (String(dir || 'smallY') !== 'largeY') {
             if (!(ty < ay - 4)) continue;
           } else {
@@ -8633,8 +10041,8 @@
     }
     const xBand =
       hasA && anchorBand.length
-        ? Math.max(90, Math.min(320, (anchorBand[Math.floor(anchorBand.length / 2)] || 120) * 1.45))
-        : 320;
+        ? Math.max(120, Math.min(620, (anchorBand[Math.floor(anchorBand.length / 2)] || 120) * 2.0))
+        : 560;
     const laneVals = vals.filter(function (v) {
       if (!hasA) return true;
       const dxA = Math.abs(Number(v.x) - ax);
@@ -8685,9 +10093,17 @@
       picked.push(cur);
     }
     const roleOrder = ['상부근', '하부근', '스트럽', '표피철근'];
-    return picked.map(function (h, idx) {
-      return { role: roleOrder[Math.min(idx, roleOrder.length - 1)] || '하단텍스트', hit: h, source: 'chain' };
-    });
+    return picked
+      .map(function (h, idx) {
+        return { role: roleOrder[Math.min(idx, roleOrder.length - 1)] || '하단텍스트', hit: h, source: 'chain' };
+      })
+      .filter(function (t) {
+        if (!t || !t.hit) return false;
+        const tx = String(t.hit.text || '');
+        if (t.role === '표피철근' && (beamFlatLooksLikeMemberMarkText(tx) || !beamFlatLooksLikeRebarValueText(tx)))
+          return false;
+        return true;
+      });
   }
 
   function beamFlatRoleValueMapFromTargets(infoTargets) {
@@ -8753,12 +10169,15 @@
     const bh = nb.y1 - nb.y0;
     if (bh < 1 || bw < 1) return null;
     const yBandMax = nb.y0 + bh * 0.44;
-    const minSpan = Math.max(40, bw * 0.18);
+    // 밑면선이 짧게 끊겨 있는 도면도 있어 최소 스팬을 완화
+    const minSpan = Math.max(12, bw * 0.10);
+    const maxFaceSpan = Math.min(16000, bw * 2.45 + bh * 0.9 + 140);
     const cand = (hSegs || []).filter(function (s) {
       if (s.orient !== 'H') return false;
       const my = (Number(s.y0) + Number(s.y1)) * 0.5;
       const span = Math.abs(Number(s.x1) - Number(s.x0));
       if (span < minSpan) return false;
+      if (span > maxFaceSpan) return false;
       return my <= yBandMax + 8 && my >= nb.y0 - 12;
     });
     cand.sort(function (a, b) {
@@ -8778,13 +10197,15 @@
     if (bh < 1) return null;
     const by = (Number(bottomSeg.y0) + Number(bottomSeg.y1)) * 0.5;
     const yBandMin = nb.y1 - bh * 0.5;
-    const minSpan = Math.max(36, bw * 0.16);
+    const minSpan = Math.max(12, bw * 0.10);
     const minGap = Math.max(16, bh * 0.07);
+    const maxFaceSpan = Math.min(16000, bw * 2.45 + bh * 0.9 + 140);
     const cand = (hSegs || []).filter(function (s) {
       if (s.orient !== 'H') return false;
       const my = (Number(s.y0) + Number(s.y1)) * 0.5;
       const span = Math.abs(Number(s.x1) - Number(s.x0));
       if (span < minSpan) return false;
+      if (span > maxFaceSpan) return false;
       if (my < yBandMin - 10) return false;
       if (my <= by + minGap) return false;
       return true;
@@ -8818,7 +10239,9 @@
       return { raw: 0, count: 2, x_lo: xLo, x_hi: xHi };
     }
     const bh = nb.y1 - nb.y0;
+    const bw = Math.max(1, nb.x1 - nb.x0);
     const minVSpan = Math.max(28, bh * 0.09);
+    const maxStirrupVRun = Math.min(14000, bh * 2.65 + bw * 1.05 + 130);
     const mids = [];
     (verticalLikeSegsIn || []).forEach(function (s) {
       if (!s) return;
@@ -8827,6 +10250,7 @@
       const sy1 = Math.max(Number(s.y0), Number(s.y1));
       const vSpan = sy1 - sy0;
       if (!Number.isFinite(mx) || !Number.isFinite(vSpan) || vSpan < minVSpan) return;
+      if (vSpan > maxStirrupVRun) return;
       if (mx < xLo || mx > xHi) return;
       mids.push(mx);
     });
@@ -8859,6 +10283,9 @@
     const segsIn = beamFlatSegmentsInSectionBBox(allSegments, bb, 6);
     const hSegs = segsIn.filter(function (s) {
       return s.orient === 'H';
+    });
+    const vSegs = segsIn.filter(function (s) {
+      return s.orient === 'V';
     });
     const rs = circles
       .map(function (c) {
@@ -8909,6 +10336,10 @@
       stirrup_count: stirrup.count,
       stirrup_circle_x_lo: stirrup.x_lo,
       stirrup_circle_x_hi: stirrup.x_hi,
+      seg_in_bbox_count: segsIn.length,
+      seg_in_bbox_h: hSegs.length,
+      seg_in_bbox_v: vSegs.length,
+      near_seg_debug: beamFlatCollectNearSegStatsForMergedGroup(g, metaRows),
     };
   }
 
@@ -8948,7 +10379,17 @@
       if (!Number.isFinite(ax) || !Number.isFinite(ay)) continue;
       const memberText = String((m && m.text) || '').replace(/\s+/g, ' ').trim();
       const zoneText = String((z && z.text) || '').replace(/\s+/g, ' ').trim();
-      out.push({ x: ax, y: ay, line: L, memberText: memberText, zoneText: zoneText });
+      const mmx = Number(m && m.x);
+      const mmy = Number(m && m.y);
+      out.push({
+        x: ax,
+        y: ay,
+        memberMarkX: Number.isFinite(mmx) ? mmx : ax,
+        memberMarkY: Number.isFinite(mmy) ? mmy : ay,
+        line: L,
+        memberText: memberText,
+        zoneText: zoneText,
+      });
     }
     return out;
   }
@@ -9001,6 +10442,8 @@
       }
       const md = beamFlatParseMemberMarkDims(a.memberText || '');
       if (best) {
+        const mmx = Number(a.memberMarkX);
+        const mmy = Number(a.memberMarkY);
         links.push({
           fromX: ax,
           fromY: ay,
@@ -9010,10 +10453,34 @@
           memberText: String(a.memberText || ''),
           zoneText: String(a.zoneText || ''),
           memberMarkDims: md,
+          memberMarkX: Number.isFinite(mmx) ? mmx : ax,
+          memberMarkY: Number.isFinite(mmy) ? mmy : ay,
         });
       }
     });
     return links;
+  }
+
+  /** 단면별 부재명 앵커(x,y) — 크기 행이 부재 세로열 아래(y)·x는 넓게 허용할 때 사용 */
+  function beamFlatMemberMarkAnchorBestByPlane(links) {
+    const best = {};
+    (links || []).forEach(function (lk) {
+      if (!lk || lk.to == null) return;
+      const ti = Number(lk.to);
+      if (!Number.isFinite(ti)) return;
+      const mx = Number(lk.memberMarkX);
+      if (!Number.isFinite(mx)) return;
+      const my = Number(lk.memberMarkY);
+      const sc = (Number(lk.dy) || 0) + (Number(lk.dx) || 0) * 0.2;
+      const b = best[ti];
+      if (!b || sc < b.sc) best[ti] = { sc: sc, mx: mx, my: Number.isFinite(my) ? my : null };
+    });
+    const out = {};
+    Object.keys(best).forEach(function (k) {
+      const e = best[k];
+      out[k] = { x: e.mx, y: e.my };
+    });
+    return out;
   }
 
   function clusterWorldPointsByDistance(points, eps) {
@@ -9134,7 +10601,8 @@
     for (let ci = 0; ci < clusters.length; ci++) {
       const bb0 = clusters[ci].bbox;
       if (!isFiniteBBox4(bb0)) continue;
-      const nearSegs = beamFlatNearbySegmentsForCluster(clusters[ci], segments);
+      const nearSegStats = {};
+      const nearSegs = beamFlatNearbySegmentsForCluster(clusters[ci], segments, nearSegStats);
       const segBb0 = bboxFromBeamFlatSegments(nearSegs);
       const circleDisp = [bb0[0] - 18, bb0[1] - 18, bb0[2] + 18, bb0[3] + 18];
       let unitBb = circleDisp.slice();
@@ -9142,12 +10610,21 @@
         const segDisp = [segBb0[0] - 10, segBb0[1] - 10, segBb0[2] + 10, segBb0[3] + 10];
         unitBb = unionBBox4(circleDisp, segDisp);
       }
-      metaRows.push({ clusterIndex: ci, circles: clusters[ci].circles, nearSegs: nearSegs, unitBb: unitBb });
+      metaRows.push({
+        clusterIndex: ci,
+        circles: clusters[ci].circles,
+        nearSegs: nearSegs,
+        nearSegStats: nearSegStats,
+        unitBb: unitBb,
+      });
     }
     const mergedGroups = beamFlatMergeOverlappingUnitBboxes(metaRows);
     const planeAnalyses = mergedGroups.map(function (g) {
       return beamFlatAnalyzeMergedSectionPlane(g, metaRows, segments, stirrupVerticalLikeSegs);
     });
+    const mzAnchors = beamFlatMemberZoneTextAnchors(runB);
+    const links = beamFlatNearestLowerSectionFromTextLinks(mzAnchors, planeAnalyses);
+    const markAnchorByPlane = beamFlatMemberMarkAnchorBestByPlane(links);
     for (let ai = 0; ai < planeAnalyses.length; ai++) {
       const pl = planeAnalyses[ai];
       if (!pl || !pl.centroid) continue;
@@ -9157,9 +10634,16 @@
         pl.norm_bbox || pl.section_bbox || null,
       );
       const belowHits = (belowPack && belowPack.hits) || [];
+      const secNbPick = beamFlatNormSectionBBox(pl.norm_bbox || pl.section_bbox || null);
+      const mAnc = markAnchorByPlane[ai];
+      const pickOpt = {};
+      if (secNbPick) pickOpt.nb = secNbPick;
+      if (mAnc && Number.isFinite(mAnc.x)) pickOpt.markAnchorX = mAnc.x;
+      if (mAnc && Number.isFinite(mAnc.y)) pickOpt.markAnchorY = mAnc.y;
       let infoTargets = beamFlatPickInfoTextsFromBelowHits(
         belowHits,
         belowPack && belowPack.dir ? belowPack.dir : 'smallY',
+        Object.keys(pickOpt).length ? pickOpt : null,
       );
       let belowMode = 'role';
       if (!infoTargets.length && belowHits.length) {
@@ -9169,6 +10653,17 @@
           belowPack && belowPack.dir ? belowPack.dir : 'smallY',
           { x: pl.centroid && pl.centroid.x, y: pl.centroid && pl.centroid.y },
         );
+      }
+      // 크기(B×H)는 라벨이 단면별 belowHits에 없을 수 있으므로 별도 fallback으로 합쳐준다.
+      const szHit = beamFlatPickSizeBxHFromBelowHits(belowHits);
+      if (szHit) {
+        const already = infoTargets.some(function (t) {
+          return t && String(t.role || '') === '크기';
+        });
+        if (!already) {
+          infoTargets.push({ role: '크기', hit: szHit, labelHit: null, fromLabel: false, source: 'size_fallback' });
+        }
+        if (belowMode === 'none') belowMode = 'role';
       }
       if (!infoTargets.length && belowHits.length) belowMode = 'none';
       else if (!infoTargets.length) belowMode = 'none';
@@ -9207,9 +10702,7 @@
         };
       });
     }
-    const mzAnchors = beamFlatMemberZoneTextAnchors(runB);
-    const links = beamFlatNearestLowerSectionFromTextLinks(mzAnchors, planeAnalyses);
-    // 부재표기치수(BxH)를 단면별로 연결(여러 링크면 가까운 링크 우선)
+    // 부재표기치수(BxH)를 단면별로 연결(여러 링크면 가까운 링크 우선) — 링크는 위에서 이미 계산됨
     const seen = {};
     for (let i = 0; i < links.length; i++) {
       const lk = links[i];
@@ -9226,6 +10719,20 @@
     }
     runB.beam_flat_center_links = links;
     runB.beam_flat_merged_section_analysis = planeAnalyses.filter(Boolean);
+    (runB.beam_flat_merged_section_analysis || []).forEach(function (pl) {
+      beamFlatFinalizeBelowTextSkin(pl);
+      const mode = String(pl.below_text_mode || '');
+      const v = pl.below_text_role_values || {};
+      const ch = pl.below_text_chain_values || [];
+      const keepSkin = (mode === 'role' && !!v['표피철근']) || (mode === 'chain' && ch.length >= 4);
+      if (Array.isArray(pl.below_text_debug_targets)) {
+        pl.below_text_debug_targets = pl.below_text_debug_targets.filter(function (d) {
+          if (!d || String(d.role || '') !== '표피철근') return true;
+          return keepSkin;
+        });
+        pl.below_text_match_count = pl.below_text_debug_targets.length;
+      }
+    });
     return runB.beam_flat_merged_section_analysis;
   }
 
@@ -9252,7 +10759,8 @@
     for (let ci = 0; ci < clusters.length; ci++) {
       const bb0 = clusters[ci].bbox;
       if (!isFiniteBBox4(bb0)) continue;
-      const nearSegs = beamFlatNearbySegmentsForCluster(clusters[ci], segments);
+      const nearSegStats = {};
+      const nearSegs = beamFlatNearbySegmentsForCluster(clusters[ci], segments, nearSegStats);
       const segBb0 = bboxFromBeamFlatSegments(nearSegs);
       const circleDisp = [bb0[0] - 18, bb0[1] - 18, bb0[2] + 18, bb0[3] + 18];
       let unitBb = circleDisp.slice();
@@ -9264,6 +10772,7 @@
         clusterIndex: ci,
         circles: clusters[ci].circles,
         nearSegs: nearSegs,
+        nearSegStats: nearSegStats,
         unitBb: unitBb,
       });
     }
@@ -9274,6 +10783,7 @@
     });
     const mzAnchors = beamFlatMemberZoneTextAnchors(runB);
     const centerLinks = beamFlatNearestLowerSectionFromTextLinks(mzAnchors, planeAnalyses);
+    const markAnchorByPlaneDraw = beamFlatMemberMarkAnchorBestByPlane(centerLinks);
     {
       const seen = {};
       for (let i = 0; i < centerLinks.length; i++) {
@@ -9458,9 +10968,16 @@
             pl.norm_bbox || pl.section_bbox || null,
           );
           const belowHits = (belowPack && belowPack.hits) || [];
+          const secNbPick = beamFlatNormSectionBBox(pl.norm_bbox || pl.section_bbox || null);
+          const mAncD = markAnchorByPlaneDraw[ai];
+          const pickOptD = {};
+          if (secNbPick) pickOptD.nb = secNbPick;
+          if (mAncD && Number.isFinite(mAncD.x)) pickOptD.markAnchorX = mAncD.x;
+          if (mAncD && Number.isFinite(mAncD.y)) pickOptD.markAnchorY = mAncD.y;
           let infoTargets = beamFlatPickInfoTextsFromBelowHits(
             belowHits,
             belowPack && belowPack.dir ? belowPack.dir : 'smallY',
+            Object.keys(pickOptD).length ? pickOptD : null,
           );
           let belowMode = 'role';
           if (!infoTargets.length && belowHits.length) {
@@ -9470,6 +10987,16 @@
               belowPack && belowPack.dir ? belowPack.dir : 'smallY',
               { x: pl.centroid && pl.centroid.x, y: pl.centroid && pl.centroid.y },
             );
+          }
+          const szHit = beamFlatPickSizeBxHFromBelowHits(belowHits);
+          if (szHit) {
+            const already = infoTargets.some(function (t) {
+              return t && String(t.role || '') === '크기';
+            });
+            if (!already) {
+              infoTargets.push({ role: '크기', hit: szHit, labelHit: null, fromLabel: false, source: 'size_fallback' });
+            }
+            if (belowMode === 'none') belowMode = 'role';
           }
           if (!infoTargets.length && belowHits.length) belowMode = 'none';
           else if (!infoTargets.length) belowMode = 'none';
@@ -9493,6 +11020,9 @@
             pl.below_text_role_values = {};
             pl.below_text_chain_values = beamFlatChainValueListFromTargets(infoTargets);
           }
+          beamFlatFinalizeBelowTextSkin(pl);
+          infoTargets = beamFlatSyncInfoTargetsAfterSkinFinalize(pl, infoTargets, belowMode);
+          pl.below_text_match_count = infoTargets.length;
           pl.below_text_debug_targets = infoTargets.map(function (t) {
             const h = t && t.hit ? t.hit : {};
             return {
@@ -9733,7 +11263,39 @@
     if (!beamHasStripOrPoly && !beamFlat) return;
     if (!runB.category) runB.category = 'beam';
     if (beamFlat) {
+      // flat 단일 경로: 브라우저 원·선 패턴(오버레이) + 서버 매칭 결과(부재명/부위) 라벨을 같이 표시
       drawBeamFlatCircleOnlyOverlays(ctx, runB);
+      const rows = Array.isArray(runB.rows) ? runB.rows : [];
+      ctx.save();
+      ctx.globalAlpha = 0.96;
+      ctx.font = 'bold 11px ui-monospace, Consolas, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.textBaseline = 'top';
+      ctx.fillStyle = 'rgba(168, 85, 247, 0.95)';
+      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+      ctx.lineWidth = 3;
+      for (let ri = 0; ri < rows.length; ri++) {
+        const r = rows[ri] || {};
+        const zones = Array.isArray(r.beam_section_geometry_zones) ? r.beam_section_geometry_zones : [];
+        const blocks = zones.length ? zones : [{ section_geometry: r.section_geometry, slab_index: 0 }];
+        for (let zi = 0; zi < blocks.length; zi++) {
+          const z = blocks[zi] || {};
+          const sg = z.section_geometry || {};
+          const bb = isFiniteBBox4(sg.search_bbox) ? sg.search_bbox : (isFiniteBBox4(sg.search_bbox_loose) ? sg.search_bbox_loose : null);
+          if (!bb) continue;
+          const x0 = Math.min(Number(bb[0]), Number(bb[2]));
+          const y0 = Math.min(Number(bb[1]), Number(bb[3]));
+          if (![x0, y0].every(Number.isFinite)) continue;
+          const mm = String(z.member_mark_text || r.member_mark_text || r.mark || r.name || '').trim();
+          const mz = String(z.member_zone_text || r.member_zone_text || '').trim();
+          const t = '#' + (ri + 1) + (mm ? ' ' + mm : '') + (mz ? ' ·' + mz : '');
+          if (!t.trim()) continue;
+          const p = worldToScreen(x0, y0);
+          ctx.strokeText(t, p[0] + 2, p[1] + 2);
+          ctx.fillText(t, p[0] + 2, p[1] + 2);
+        }
+      }
+      ctx.restore();
       return;
     }
     const brows = runB.rows || [];
@@ -11011,6 +12573,7 @@
     el.textContent = JSON.stringify(info, null, 2);
     fillBeamSectionOverlapDebug();
     fillBeamFlatBelowMatchDebug();
+    fillBeamFlatBelowHitsRawDebug();
   }
 
   function syncViewerSidebars() {
@@ -11425,6 +12988,20 @@
     drawBeamRowClusterOverlay(ctx);
     drawColumnSectionGeometryOverlays(ctx);
     drawBeamSectionGeometryOverlays(ctx);
+    /* 브라우저 원·선 패턴 오버레이 — 서버 flat과 겹칠 수 있어 branch=flat 이면 생략 */
+    if (
+      showColumnSectionOverlays &&
+      previewData &&
+      activeExtractTabKey() === 'beam' &&
+      showBeamCirclePatternDebugOverlay
+    ) {
+      const runDbg = beamCirclePatternDebugRunForOverlay();
+      if (!runDbg) return;
+      const vb = (runDbg && runDbg.validation) || {};
+      if (!beamLayoutResolvedFlat(vb)) {
+        drawBeamFlatCircleOnlyOverlays(ctx, runDbg);
+      }
+    }
     /* 가로보 매칭 오버레이: flat 모드는 부재↔부위 선만 표시 */
     drawBeamHorizontalZoneMatchLines(ctx);
     /* 세로 스트립 전용 폴리라인만 */
@@ -11447,6 +13024,15 @@
         ? (lastMeasureDistText ? '길이측정: 끝점 · ' + lastMeasureDistText : '길이측정: 끝점')
         : (lastMeasureDistText ? '길이측정: 시작점 · ' + lastMeasureDistText : '길이측정: 시작점');
       st = seg + '\n' + stLine1 + '\n' + stLine2;
+    }
+    if (
+      activeExtractTabKey() === 'beam' &&
+      showBeamCirclePatternDebugOverlay &&
+      previewData
+    ) {
+      const runDbg = lastRunByCategory.beam;
+      const flatRun = runDbg && beamLayoutResolvedFlat(runDbg.validation || {});
+      st += '\n원·선 패턴 디버그 ON' + (flatRun ? ' (서버 flat 경로 — 중복 오버레이 생략)' : ' (브라우저 단면 후보 중첩)');
     }
     if (showColumnSectionOverlays) {
       let nCadOverlayIssueRows = 0;
@@ -12864,6 +14450,7 @@
     });
     syncExtractScheduleBboxUi();
     refreshExtractResultForActiveTab();
+    scheduleViewerRedraw();
   }
   document.querySelectorAll('.extract-tab[data-rptab]').forEach((btn) => {
     btn.addEventListener('click', () => setRightPanelTab(btn.dataset.rptab));
@@ -13390,6 +14977,60 @@
     };
   }
 
+  const btnBeamFlatBelowHitsRawCopy = $('btnBeamFlatBelowHitsRawCopy');
+  if (btnBeamFlatBelowHitsRawCopy) {
+    btnBeamFlatBelowHitsRawCopy.onclick = function () {
+      const t = window.__lastBeamFlatBelowHitsRawDebugPlain || '';
+      if (!t) {
+        alert('복사할 하단 텍스트 원본(hits) 진단이 없습니다. 보 탭에서 단면 오버레이를 확인한 뒤 다시 시도하세요.');
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(
+          function () {
+            const msg = $('msgExtract');
+            if (msg) {
+              msg.className = 'msg ok';
+              msg.textContent = '보 flat 하단 텍스트 원본(hits) 진단을 클립보드에 복사했습니다.';
+            }
+          },
+          function () {
+            alert('클립보드 복사에 실패했습니다.');
+          },
+        );
+      } else {
+        window.prompt('아래를 복사하세요:', t);
+      }
+    };
+  }
+
+  const btnBeamFlatSegCopy = $('btnBeamFlatSegFilterCopy');
+  if (btnBeamFlatSegCopy) {
+    btnBeamFlatSegCopy.onclick = function () {
+      const t = window.__lastBeamFlatSegFilterDebugPlain || '';
+      if (!t) {
+        alert('복사할 선분 디버그가 없습니다. 보 탭에서 단면 오버레이를 확인한 뒤 다시 시도하세요.');
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(
+          function () {
+            const msg = $('msgExtract');
+            if (msg) {
+              msg.className = 'msg ok';
+              msg.textContent = '보 flat 선분(묶임/제외) 디버그를 클립보드에 복사했습니다.';
+            }
+          },
+          function () {
+            alert('클립보드 복사에 실패했습니다.');
+          },
+        );
+      } else {
+        window.prompt('아래를 복사하세요:', t);
+      }
+    };
+  }
+
   const btnColPick = $('btnColumnRangePick');
   if (btnColPick) {
     btnColPick.onclick = () => {
@@ -13572,6 +15213,14 @@
     const el = $(id);
     if (el) el.addEventListener('change', scheduleViewerRedraw);
   });
+  const chkBeamCircleDbg = $('chkBeamCirclePatternDebug');
+  if (chkBeamCircleDbg) {
+    showBeamCirclePatternDebugOverlay = !!chkBeamCircleDbg.checked;
+    chkBeamCircleDbg.addEventListener('change', function () {
+      showBeamCirclePatternDebugOverlay = !!chkBeamCircleDbg.checked;
+      scheduleViewerRedraw();
+    });
+  }
 
   refreshProjectList().catch(() => {});
   setWorkspacePane('data');

@@ -6,6 +6,11 @@ from app.services.beam_flat_spatial import (
     is_flat_zone_anchor_text,
 )
 from app.services.beam_extraction import (
+    _beam_centroid_entities,
+    _beam_cluster_col_y_bounds_in_rows,
+    _beam_cluster_mark_column_centers,
+    extract_beam_row_cluster_bundle,
+    _beam_row_cluster_zone_spans_rows,
     _beam_flat_section_focus_y_bounds,
     _beam_vertical_template_section_y_for_strip,
     _beam_vertical_cluster_mark_tuples_by_y_then_x,
@@ -27,6 +32,10 @@ from app.services.beam_extraction import (
     _record_from_beam_vertical_dynamic,
     _split_beam_mark_and_dim_parens,
     _split_beam_vertical_dyn_by_zone_spans,
+    _beam_row_cluster_centroid_xy_mode_x,
+    _beam_row_cluster_parse_horizontal_zone_slots,
+    _beam_row_cluster_zone_slot_centroids_x,
+    _beam_row_cluster_x_histogram_peak_centers,
     beam_duplicate_key,
     extract_beam_horizontal_from_clusters,
     extract_beam_vertical_blocks,
@@ -37,6 +46,125 @@ from app.services.schedule_extraction import ExtractionConfig, _map_data_bands_t
 
 def _row(items: list[tuple[float, float, str]]) -> list[dict]:
     return [{"x": x, "y": y, "text": t, "layer": "0", "id": 0, "entity_type": "TEXT"} for x, y, t in items]
+
+
+def test_beam_row_cluster_parse_horizontal_zone_slots_end_cen():
+    slots = _beam_row_cluster_parse_horizontal_zone_slots("END CEN")
+    assert len(slots) == 2
+    assert slots[0][1] == "ext" and slots[1][1] == "cen"
+
+
+def test_beam_row_cluster_zone_slot_centroids_x_per_token():
+    centers = [1000.0, 2200.0]
+    band = _row(
+        [
+            (920, 3000, "END"),
+            (1250, 3000, "CEN"),
+            (1000, 3000, "G1"),
+            (2200, 3000, "G2"),
+        ]
+    )
+    slots = [("END", "ext"), ("CEN", "cen")]
+    xs = _beam_row_cluster_zone_slot_centroids_x(band, centers, 0, slots)
+    assert xs[0] is not None and abs(float(xs[0]) - 920.0) < 1.0
+    assert xs[1] is not None and abs(float(xs[1]) - 1250.0) < 1.0
+
+
+def test_extract_beam_row_cluster_bundle_splits_end_cen_into_two_strips():
+    """부위 띠 셀에 END·CEN이 같이 있으면 부호 열마다 단면 스트립( X )을 둘로 나눈다."""
+    y0, y1, y2, y3 = 3500.0, 3400.0, 3300.0, 3200.0
+    r_mark = _row([(100, y0, "x"), (1000, y0, "G1"), (2400, y0, "G2")])
+    r_band = _row(
+        [
+            (100, y1, "x"),
+            (920, y1, "END"),
+            (1180, y1, "CEN"),
+            (1000, y1, "400x600"),
+            (2380, y1, "CENTER"),
+            (2400, y1, "500"),
+        ]
+    )
+    r_sec = _row([(100, y2, "SECTION"), (1000, y2, "300x500"), (2400, y2, "300x500")])
+    r_bar = _row([(100, y3, "Top"), (1000, y3, "2-D16"), (2400, y3, "2-D16")])
+    rows, meta = extract_beam_row_cluster_bundle([r_mark, r_band, r_sec, r_bar], ExtractionConfig())
+    g1 = [r for r in rows if r.get("mark") == "G1"]
+    assert len(g1) >= 2
+    zkeys = {str(r.get("beam_vertical_zone_key") or "") for r in g1}
+    assert "ext" in zkeys and "cen" in zkeys
+    xcs = sorted(float(r["_beam_row_cluster_centroid_x"]) for r in g1 if r.get("_beam_row_cluster_centroid_x") is not None)
+    assert xcs[0] < xcs[-1]
+    strips = meta.get("beam_vertical_strips") or []
+    assert len(strips) >= 2
+    xc_strip = [float(s.get("x_center") or 0) for s in strips[:2]]
+    assert xc_strip[0] < xc_strip[1]
+
+
+def test_extract_beam_row_cluster_bundle_vertical_zones_distinct_centroid_x_same_mark_column():
+    """
+    부위 띠가 열마다 'END'·'CENTER' 한 토큰(가로 다부위 아님)이어도, 세로 존(yb)마다
+    해당 구간 텍스트만으로 X를 잡아 같은 부호 열의 END(ext)·CEN이 서로 다른 앵커 X를 갖는다.
+    """
+    r_mark = _row([(50, 4000, "부호"), (1000, 4000, "G1"), (2400, 4000, "G2B")])
+    r_end = _row([(50, 3400, "END"), (1000, 3400, "400"), (2350, 3400, "400")])
+    r_sec = _row([(50, 3300, "형태"), (1000, 3300, "400x600"), (2480, 3300, "400x600")])
+    r_cen = _row([(50, 2800, "CENTER"), (1000, 2800, "400"), (2420, 2800, "400")])
+    r_tail = _row([(50, 2500, "상부근"), (1000, 2500, "2-D16"), (2520, 2500, "2-D16")])
+    rows, _meta = extract_beam_row_cluster_bundle(
+        [r_mark, r_end, r_sec, r_cen, r_tail], ExtractionConfig()
+    )
+    g2b = [
+        r
+        for r in rows
+        if r.get("mark") == "G2B"
+        and r.get("beam_vertical_zone_key") in ("ext", "cen")
+        and r.get("_beam_row_cluster_centroid_x") is not None
+    ]
+    assert len(g2b) == 2
+    by_z = {str(r["beam_vertical_zone_key"]): float(r["_beam_row_cluster_centroid_x"]) for r in g2b}
+    assert abs(by_z["ext"] - by_z["cen"]) > 25.0
+
+
+def test_extract_beam_row_cluster_bundle_spreads_collapsed_zone_centroids_same_x_column():
+    """존별 데이터 열 텍스트가 모두 동일 X(1000)에만 있으면 Y필터 후에도 centroid X가 같아 열 구간으로 분산된다."""
+    r_mark = _row([(50, 4000, "부호"), (1000, 4000, "G2B"), (2400, 4000, "G3")])
+    r_end = _row([(50, 3400, "END"), (1000, 3400, "400"), (2350, 3400, "400")])
+    r_sec = _row([(50, 3300, "형태"), (1000, 3300, "400x600"), (2480, 3300, "400x600")])
+    # G2B 열 값은 모두 x=1000 (세로 한 줄) — centroid 붕괴 유도
+    r_cen = _row([(50, 2800, "CENTER"), (1000, 2800, "400"), (1000, 2750, "400")])
+    r_tail = _row([(50, 2500, "상부근"), (1000, 2500, "2-D16"), (2520, 2500, "2-D16")])
+    rows, _meta = extract_beam_row_cluster_bundle(
+        [r_mark, r_end, r_sec, r_cen, r_tail], ExtractionConfig()
+    )
+    g2b = [
+        float(r["_beam_row_cluster_centroid_x"])
+        for r in rows
+        if r.get("mark") == "G2B"
+        and r.get("beam_vertical_zone_key") in ("ext", "cen")
+        and r.get("_beam_row_cluster_centroid_x") is not None
+    ]
+    assert len(g2b) == 2
+    assert abs(g2b[0] - g2b[1]) > 20.0
+
+
+def test_beam_row_cluster_x_histogram_peak_centers_top_frequency_bins():
+    """열 전체에 X가 두 군집이면 건수 상위 빈 중심이 둘로 나온다."""
+    ents = [{"x": 1000.0, "y": float(i)} for i in range(12)] + [{"x": 2480.0, "y": float(i)} for i in range(10)]
+    peaks = _beam_row_cluster_x_histogram_peak_centers(
+        ents, bin_width=420.0, column_center_x=1700.0, num_peaks=2
+    )
+    assert len(peaks) == 2
+    assert abs(peaks[0] - 1000.0) < 80.0 and abs(peaks[1] - 2480.0) < 80.0
+
+
+def test_beam_row_cluster_centroid_xy_mode_x_prefers_dense_x_cluster():
+    """열 내 다수 TEXT가 한쪽 X에 몰리고 병합 크기 한 점이 멀리 있으면, 최빈 X 구간을 택한다."""
+    ents = [{"x": 2100.0, "y": float(i * 30)} for i in range(10)]
+    ents.append({"x": 7800.0, "y": 12.0})
+    mode_xy = _beam_row_cluster_centroid_xy_mode_x(ents, bin_width=420.0, column_center_x=2150.0)
+    mean_xy = _beam_centroid_entities(ents)
+    assert mode_xy and mean_xy
+    assert abs(mode_xy[0] - 2100.0) < 25.0
+    assert mean_xy[0] > 2600.0
 
 
 def test_beam_flat_section_focus_y_bounds_between_zone_and_bar():
@@ -408,6 +536,49 @@ def test_beam_vertical_blocks_smoke():
 def test_beam_duplicate_key_stable():
     r = {"mark": "G1", "width_mm": 400, "depth_mm": 600, "int_top_bar": "2-D16"}
     assert beam_duplicate_key(r) == beam_duplicate_key(dict(r))
+
+
+def test_beam_duplicate_key_differs_by_vertical_zone():
+    a = {"mark": "G1", "width_mm": 400, "depth_mm": 600, "int_top_bar": "2-D16", "beam_vertical_zone_key": "int"}
+    b = {**a, "beam_vertical_zone_key": "cen"}
+    assert beam_duplicate_key(a) != beam_duplicate_key(b)
+
+
+def test_row_cluster_zone_spans_detect_zone_in_data_cells_not_only_left_label():
+    """부위 토큰이 좌측 라벨이 아니라 부호 열 셀에만 있어도 구간을 나눈다."""
+    # 부호 열 X는 1800·2800 고정, INT는 첫 열(1800 근처) 텍스트로만 온다(좌측 라벨은 '표시'뿐).
+    r_int = _row([(400, 3000, "표시"), (1700, 3000, "INT"), (1800, 3000, "RG1"), (2800, 3000, "RG2")])
+    r_sec = _row([(400, 2850, "SECTION"), (1800, 2850, "300x500"), (2800, 2850, "300x500")])
+    r_cen = _row([(400, 2550, "표시"), (1700, 2550, "CENTER"), (1800, 2550, "RG1"), (2800, 2550, "RG2")])
+    block = [r_int, r_sec, r_cen]
+    centers = _beam_cluster_mark_column_centers(block)
+    assert centers is not None and len(centers) == 2
+    spans = _beam_row_cluster_zone_spans_rows(block, centers)
+    assert spans is not None
+    assert any(seg[0] == "int" for seg in spans)
+    assert any(seg[0] == "cen" for seg in spans)
+
+
+def test_row_cluster_zone_spans_split_y_bounds_per_mark_column():
+    """부위 라벨(INT/CENTER)마다 세그먼트를 나누면 열별 Y범위가 달라질 수 있다."""
+    r_int = _row([(400, 3000, "INT"), (1000, 3000, "RG1"), (2000, 3000, "RG2")])
+    r_sec = _row([(400, 2850, "SECTION"), (1000, 2850, "300x500"), (2000, 2850, "300x500")])
+    r_intro = _row([(400, 2700, "기타"), (1000, 2700, "RG1"), (2000, 2700, "RG2")])
+    r_cen = _row([(400, 2550, "CENTER"), (1000, 2550, "RG1"), (2000, 2550, "RG2")])
+    r_tail = _row([(400, 2400, "HOOP"), (1000, 2400, "2-D10"), (2000, 2400, "2-D10")])
+    block = [r_int, r_sec, r_intro, r_cen, r_tail]
+    centers = _beam_cluster_mark_column_centers(block)
+    assert centers is not None and len(centers) == 2
+    spans = _beam_row_cluster_zone_spans_rows(block, centers)
+    assert spans is not None
+    int_rows = next(seg[2] for seg in spans if seg[0] == "int")
+    cen_rows = next(seg[2] for seg in spans if seg[0] == "cen")
+    y_int = _beam_cluster_col_y_bounds_in_rows(centers, int_rows, 0)
+    y_cen = _beam_cluster_col_y_bounds_in_rows(centers, cen_rows, 0)
+    assert y_int is not None and y_cen is not None
+    assert y_int[0] <= 2700.0 <= y_int[1]
+    assert y_cen[0] <= 2400.0 <= y_cen[1]
+    assert y_int[1] > y_cen[1]
 
 
 def test_normalize_beam_rebar_two_tier_d_notation():

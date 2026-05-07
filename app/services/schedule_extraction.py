@@ -18,6 +18,7 @@ from app.models import Entity
 
 from app.services.column_section_geometry import (
     enrich_rows_beam_flat_section_geometry,
+    # 보 추출은 flat 단면만 사용 — 세로 존 enrich는 하위 호환·테스트용으로만 유지
     enrich_rows_beam_vertical_section_geometry_zones,
     enrich_rows_column_section_geometry,
     header_row_is_section_geometry_anchor,
@@ -2797,6 +2798,140 @@ def _detect_duplicates(rows_out: list[dict[str, Any]], key_fn) -> list[int]:
     return dup_idx
 
 
+def _beam_flat_zone_wh_mm(r: dict[str, Any], z: dict[str, Any]) -> tuple[Any, Any]:
+    sg = z.get("section_geometry") if isinstance(z.get("section_geometry"), dict) else {}
+    w = sg.get("width_mm")
+    d = sg.get("depth_mm")
+    if w is None:
+        w = r.get("width_mm")
+    if d is None:
+        d = r.get("depth_mm")
+    return w, d
+
+
+def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """flat 단면·존·하단텍스트만으로 부재별 표 1행 후보를 만든다(슬랩/존이 여러 개면 행을 나눔)."""
+    out: list[dict[str, Any]] = []
+    for ri, r in enumerate(rows):
+        zones = r.get("beam_section_geometry_zones")
+        if isinstance(zones, list) and len(zones) > 1:
+            for zi, z in enumerate(zones):
+                if not isinstance(z, dict):
+                    continue
+                w, d = _beam_flat_zone_wh_mm(r, z)
+                slab_idx = z.get("slab_index")
+                if slab_idx is None:
+                    slab_idx = zi
+                mark = str(z.get("member_mark_text") or r.get("mark") or r.get("name") or "").strip()
+                zone_t = str(z.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip()
+                btr = z.get("below_text_role_values") if isinstance(z.get("below_text_role_values"), dict) else {}
+                out.append(
+                    {
+                        "source_row_index": ri,
+                        "slab_index": int(slab_idx) if isinstance(slab_idx, (int, float)) else slab_idx,
+                        "member_mark_text": mark,
+                        "member_zone_text": zone_t,
+                        "member_mark_dims": z.get("member_mark_dims"),
+                        "below_text_role_values": dict(btr),
+                        "below_text_chain_values": list(z.get("below_text_chain_values") or [])
+                        if isinstance(z.get("below_text_chain_values"), list)
+                        else [],
+                        "width_mm": w,
+                        "depth_mm": d,
+                        "strip_x": z.get("x_center"),
+                        "section_geometry": z.get("section_geometry"),
+                    }
+                )
+            continue
+        if isinstance(zones, list) and len(zones) == 1 and isinstance(zones[0], dict):
+            z = zones[0]
+            w, d = _beam_flat_zone_wh_mm(r, z)
+            mark = str(z.get("member_mark_text") or r.get("mark") or "").strip()
+            zone_t = str(z.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip()
+            btr = z.get("below_text_role_values") if isinstance(z.get("below_text_role_values"), dict) else {}
+            out.append(
+                {
+                    "source_row_index": ri,
+                    "slab_index": z.get("slab_index", 0),
+                    "member_mark_text": mark,
+                    "member_zone_text": zone_t,
+                    "member_mark_dims": z.get("member_mark_dims"),
+                    "below_text_role_values": dict(btr),
+                    "below_text_chain_values": list(z.get("below_text_chain_values") or [])
+                    if isinstance(z.get("below_text_chain_values"), list)
+                    else [],
+                    "width_mm": w,
+                    "depth_mm": d,
+                    "strip_x": z.get("x_center"),
+                    "section_geometry": z.get("section_geometry"),
+                }
+            )
+            continue
+        w, d = r.get("width_mm"), r.get("depth_mm")
+        btr = r.get("below_text_role_values") if isinstance(r.get("below_text_role_values"), dict) else {}
+        out.append(
+            {
+                "source_row_index": ri,
+                "slab_index": 0,
+                "member_mark_text": str(r.get("mark") or r.get("name") or "").strip(),
+                "member_zone_text": str(r.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip(),
+                "member_mark_dims": r.get("member_mark_dims"),
+                "below_text_role_values": dict(btr),
+                "below_text_chain_values": list(r.get("below_text_chain_values") or [])
+                if isinstance(r.get("below_text_chain_values"), list)
+                else [],
+                "width_mm": w,
+                "depth_mm": d,
+                "strip_x": r.get("_beam_row_cluster_centroid_x"),
+                "section_geometry": r.get("section_geometry"),
+            }
+        )
+    return out
+
+
+def build_beam_flat_member_zone_match_lines(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """
+    서버 flat 단일 경로에서 부재→부위→단면(중심) 연결선을 프론트에 승격해 내려준다.
+    points: [(member_x,y), (zone_x,y), (section_center_x,y)]
+    """
+    out: list[dict[str, Any]] = []
+    for ri, r in enumerate(rows or []):
+        zones = r.get("beam_section_geometry_zones")
+        blocks: list[dict[str, Any]] = (
+            [z for z in zones if isinstance(z, dict)] if isinstance(zones, list) and zones else []
+        )
+        if not blocks:
+            sg = r.get("section_geometry") if isinstance(r.get("section_geometry"), dict) else {}
+            blocks = [{"slab_index": 0, "section_geometry": sg}]
+        for zi, z in enumerate(blocks):
+            mm = z.get("member_mark_anchor") if isinstance(z.get("member_mark_anchor"), dict) else None
+            mz = z.get("member_zone_anchor") if isinstance(z.get("member_zone_anchor"), dict) else None
+            sc = z.get("section_center") if isinstance(z.get("section_center"), dict) else None
+            if not (mm and mz and sc):
+                continue
+            try:
+                pts = [
+                    [round(float(mm["x"]), 4), round(float(mm["y"]), 4)],
+                    [round(float(mz["x"]), 4), round(float(mz["y"]), 4)],
+                    [round(float(sc["x"]), 4), round(float(sc["y"]), 4)],
+                ]
+            except (TypeError, ValueError, KeyError):
+                continue
+            slab_idx = z.get("slab_index")
+            if slab_idx is None:
+                slab_idx = zi
+            out.append(
+                {
+                    "row_index": ri,
+                    "slab_index": slab_idx,
+                    "member_mark_text": str(z.get("member_mark_text") or r.get("mark") or r.get("name") or "").strip(),
+                    "member_zone_text": str(z.get("member_zone_text") or "").strip(),
+                    "points": pts,
+                }
+            )
+    return out
+
+
 def extract_schedule(
     db: Session,
     commit_id: int,
@@ -2986,16 +3121,7 @@ def extract_schedule(
         headers_ok = isinstance(_fh, list) and len(_fh) > 0
         layout_res = str(bv.get("beam_layout_resolved") or "").strip().lower()
         csg_on = raw.get("column_section_geometry", True) is not False
-        # 번들 플래그만 True이고 스트립·헤더가 비면 enrich_rows_beam_vertical_section_geometry_zones 가
-        # 곧바로 return 하므로, 실제로 스트립/헤더가 있을 때만 세로 존 경로를 탄다.
-        _do_beam_vertical_zones = csg_on and (
-            (bv.get("beam_vertical_blocks") is True)
-            or (bv.get("beam_row_cluster_bundle") is True and strips_ok and headers_ok)
-            or strips_ok
-            or headers_ok
-        )
-        has_flat_role = any(str(r.get("beam_row_role") or "") == "beam_flat" for r in rows_out)
-        _do_beam_flat_geo = csg_on and bool(rows_out) and (layout_res == "flat" or has_flat_role)
+        _do_beam_flat_geo = csg_on and bool(rows_out)
         clip_bbs: list[tuple[float, float, float, float]] = list(selection_bboxes)
         if selection_bbox is not None:
             clip_bbs.append(selection_bbox)
@@ -3003,30 +3129,14 @@ def extract_schedule(
         validation["beam_section_geo_debug"] = {
             "layout_res": layout_res,
             "csg_on": csg_on,
-            "do_vertical_zones": _do_beam_vertical_zones,
+            "do_vertical_zones": False,
             "do_flat_geo": _do_beam_flat_geo,
             "strips_ok": strips_ok,
             "headers_ok": headers_ok,
-            "has_flat_role": has_flat_role,
+            "note": "beam uses flat section pipeline only",
         }
         validation["beam_flat_section_geometry"] = False
-        if _do_beam_vertical_zones:
-            validation["beam_section_geo_branch"] = "vertical_zones"
-            try:
-                enrich_rows_beam_vertical_section_geometry_zones(
-                    db,
-                    commit_id,
-                    rows_out,
-                    beam_validation.get("beam_vertical_field_headers"),
-                    beam_validation.get("beam_vertical_strips"),
-                    half_width=_optional_positive_float(raw, "column_section_half_width"),
-                    half_height=_optional_positive_float(raw, "column_section_half_height"),
-                    include_block_definitions=raw.get("column_section_block_geometry", True) is not False,
-                    selection_world_bboxes=clip_arg,
-                )
-            except Exception as ex:
-                validation["section_geometry_error"] = f"{type(ex).__name__}: {ex}"[:400]
-        elif _do_beam_flat_geo:
+        if _do_beam_flat_geo:
             validation["beam_section_geo_branch"] = "flat"
             try:
                 enrich_rows_beam_flat_section_geometry(
@@ -3043,6 +3153,15 @@ def extract_schedule(
                 validation["section_geometry_error"] = f"{type(ex).__name__}: {ex}"[:400]
         else:
             validation["beam_section_geo_branch"] = "none"
+
+        try:
+            validation["beam_flat_member_table_rows"] = build_beam_flat_member_table_rows(rows_out)
+        except Exception as ex:
+            validation["beam_flat_member_table_error"] = f"{type(ex).__name__}: {ex}"[:300]
+        try:
+            validation["beam_flat_member_zone_match_lines"] = build_beam_flat_member_zone_match_lines(rows_out)
+        except Exception as ex:
+            validation["beam_flat_member_zone_match_error"] = f"{type(ex).__name__}: {ex}"[:300]
 
         validation["duplicate_row_indices"] = _detect_duplicates(rows_out, beam_duplicate_key)
         return rows_out, validation

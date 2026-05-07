@@ -43,6 +43,7 @@ from app.services.schedule_extraction import (
     parse_text_signals,
     _row_has_beam_mark_like,
     _row_is_beam_header_like,
+    _row_nonempty_texts,
 )
 
 # --- 헤더 → 내부 키 (JSON/엑셀 공통) ---
@@ -3401,6 +3402,59 @@ def _beam_centroid_entities(ents: list[dict[str, Any]]) -> tuple[float, float] |
     return sum(xs) / len(xs), sum(ys) / len(ys)
 
 
+def _beam_row_cluster_centroid_xy_mode_x(
+    ents: list[dict[str, Any]],
+    *,
+    bin_width: float,
+    column_center_x: float | None = None,
+) -> tuple[float, float] | None:
+    """
+    같은 열(부호)에 붙은 TEXT 삽입점 X를 모아, X 히스토그램에서 건수가 가장 많은 구간의
+    중심을 X로 쓴다. 병합 크기(예: 400x600) 한 점이 평균을 가운데로 잡아당기는 경우를 완화한다.
+    동률이면 column_center_x(열 마크 중심)에 가까운 구간을 택한다.
+    """
+    if not ents:
+        return None
+    xs: list[float] = []
+    ys: list[float] = []
+    for it in ents:
+        try:
+            xs.append(float(it["x"]))
+            ys.append(float(it["y"]))
+        except (TypeError, KeyError, ValueError):
+            continue
+    if not xs:
+        return None
+    if len(xs) == 1:
+        return float(xs[0]), float(ys[0])
+    x_min = min(xs)
+    x_max = max(xs)
+    span = x_max - x_min
+    bw = max(28.0, min(float(bin_width), max(40.0, span / 8.0 + 1e-6)))
+    buckets: dict[int, list[tuple[float, float]]] = {}
+    for xv, yv in zip(xs, ys):
+        bi = int((xv - x_min) // bw)
+        buckets.setdefault(bi, []).append((xv, yv))
+
+    def bucket_score(items: list[tuple[float, float]]) -> tuple[int, float]:
+        n = len(items)
+        mx = sum(p[0] for p in items) / n
+        tie = abs(mx - float(column_center_x)) if column_center_x is not None else 0.0
+        return (n, -tie)
+
+    best_items = max(buckets.values(), key=bucket_score)
+    mx = sum(p[0] for p in best_items) / len(best_items)
+    my = sum(p[1] for p in best_items) / len(best_items)
+    # 상·하부근 등이 한쪽에만 몰리고 병합 크기가 반대편에 있을 때: 최빈 구간이 소수면 중앙값 X로 보정
+    if len(best_items) < max(3, int(0.22 * len(xs))):
+        xs_sorted = sorted(xs)
+        med_x = float(xs_sorted[len(xs_sorted) // 2])
+        near_y = [yv for xv, yv in zip(xs, ys) if abs(xv - med_x) <= bw * 1.75]
+        my2 = sum(near_y) / len(near_y) if near_y else sum(ys) / len(ys)
+        return med_x, my2
+    return mx, my
+
+
 def _looks_like_value_text(s: str) -> bool:
     """
     좌측 라벨(헤더)로 오인되기 쉬운 값 텍스트를 구분해, 같은 R(가로띠)에서도 값이 라벨로 뭉치는 것을 방지한다.
@@ -3447,21 +3501,21 @@ def _beam_cluster_mark_column_centers(block_rows: list[list[dict[str, Any]]]) ->
     return sorted(best)
 
 
-def _beam_row_label_and_cells_by_mark_centers(
+def _beam_row_partition_label_and_col_entities(
     row: list[dict[str, Any]],
     centers: list[float],
-) -> tuple[str, list[str]]:
-    """한 Y행에서 좌측 라벨 + 부호열 N개 값을 분리."""
+) -> tuple[str, list[list[dict[str, Any]]]]:
+    """한 Y행: 좌측 라벨 + 부호열별 엔티티 리스트(단면 Y를 부위별로 나눌 때 재사용)."""
     if not row:
-        return "", [""] * len(centers)
+        return "", [[] for _ in range(len(centers))]
     c_sorted = sorted(float(x) for x in centers)
     c_count = len(c_sorted)
     if c_count < 1:
         parts = [str(r.get("text") or "").strip() for r in row if str(r.get("text") or "").strip()]
         joined = " ".join(parts)
-        return "", [joined]
+        sorted_r = sorted(row, key=lambda r: float(r["x"]))
+        return "", [list(sorted_r)] if sorted_r else [[]]
 
-    # 라벨 경계: 첫 부호 열보다 충분히 왼쪽
     if c_count >= 2:
         dx = max(1.0, c_sorted[1] - c_sorted[0])
         x_label_hi = c_sorted[0] - max(120.0, min(420.0, dx * 0.45))
@@ -3479,20 +3533,232 @@ def _beam_row_label_and_cells_by_mark_centers(
             x = float(e["x"])
         except (TypeError, KeyError, ValueError):
             continue
-        # 값처럼 보이는 텍스트는 좌측 영역이어도 열에 배정(뭉침 방지)
         if x <= x_label_hi and not _looks_like_value_text(t):
             label_parts.append(t)
             continue
         j = min(range(c_count), key=lambda k: abs(x - c_sorted[k]))
         by_col[j].append(e)
-
     lab = " ".join(label_parts).strip()
+    return lab, by_col
+
+
+def _beam_row_label_and_cells_by_mark_centers(
+    row: list[dict[str, Any]],
+    centers: list[float],
+) -> tuple[str, list[str]]:
+    """한 Y행에서 좌측 라벨 + 부호열 N개 값을 분리."""
+    if not row:
+        return "", [""] * len(centers)
+    c_count = len(centers)
+    if c_count < 1:
+        parts = [str(r.get("text") or "").strip() for r in row if str(r.get("text") or "").strip()]
+        joined = " ".join(parts)
+        return "", [joined]
+
+    lab, by_col = _beam_row_partition_label_and_col_entities(row, centers)
     cells: list[str] = []
-    for j in range(c_count):
+    for j in range(len(by_col)):
         ents = sorted(by_col[j], key=lambda r: float(r["x"]))
         txts = [str(e.get("text") or "").strip() for e in ents if str(e.get("text") or "").strip()]
         cells.append(" ".join(txts).strip())
+    while len(cells) < c_count:
+        cells.append("")
     return lab, cells
+
+
+_BEAM_ROW_CLUSTER_ZONE_SPAN_KEYS = frozenset({"int", "cen", "ext", "both", "all"})
+
+
+def _beam_row_cluster_zone_band_row(
+    block_rows: list[list[dict[str, Any]]],
+    centers: list[float],
+) -> list[dict[str, Any]] | None:
+    """부호 열 위 ALL/END/CEN… 띠 후보 행(열 셀별 부위 문자열과 동일 소스)."""
+    if not block_rows or not centers:
+        return None
+    rows_sorted = sorted(block_rows or [], key=lambda br: -_beam_cluster_row_mean_y(br))
+    best_row: list[dict[str, Any]] | None = None
+    best_score = 0.0
+    for row in rows_sorted:
+        tx = _row_nonempty_texts(row)
+        if len(tx) < 3:
+            continue
+        hits = 0
+        for t in tx:
+            u = re.sub(r"\s+", " ", str(t).strip()).upper()
+            if u in ("ALL", "END", "CEN", "CENTER", "INT", "EXT", "BOTH"):
+                hits += 1
+                continue
+            z = _beam_vertical_zone_from_label(str(t))
+            if z in _BEAM_ROW_CLUSTER_ZONE_SPAN_KEYS:
+                hits += 1
+        score = hits / max(len(tx), 1)
+        if score > best_score and hits >= max(3, int(0.45 * len(tx))):
+            best_score = score
+            best_row = row
+    return best_row
+
+
+def _beam_row_cluster_parse_horizontal_zone_slots(zcell: str) -> list[tuple[str, str]]:
+    """
+    한 부호 열 셀에 'END CEN', 'INT/CEN/EXT'처럼 여러 부위가 있을 때 (표시문, zone_key) 목록.
+    ALL은 다른 부위와 같이 있으면 스킵(단면 앵커는 END/CEN…만 분리).
+    """
+    raw = (zcell or "").strip()
+    if not raw:
+        return []
+    chunks = [p.strip() for p in re.split(r"[/,\s|]+", raw) if p.strip()]
+    raw_slots: list[tuple[str, str]] = []
+    seen_zk: set[str] = set()
+    for ch in chunks:
+        zk = _beam_vertical_zone_from_label(ch)
+        if zk not in _BEAM_ROW_CLUSTER_ZONE_SPAN_KEYS:
+            continue
+        if zk == "all":
+            raw_slots.append((ch, zk))
+            continue
+        if zk in seen_zk:
+            continue
+        seen_zk.add(zk)
+        raw_slots.append((ch, zk))
+    non_all = [(a, b) for a, b in raw_slots if b != "all"]
+    return non_all if non_all else raw_slots
+
+
+def _beam_row_cluster_col_x_inner_span(c_sorted: list[float], j: int) -> tuple[float, float]:
+    """부호 열 j 안에서 부위별 X를 나눌 때 쓰는 가로 구간(이웃 열 중점 사이)."""
+    c_count = len(c_sorted)
+    if c_count <= 0:
+        return (-400.0, 400.0)
+    if c_count == 1:
+        c0 = float(c_sorted[0])
+        return (c0 - 520.0, c0 + 520.0)
+    gap_l = abs(float(c_sorted[j]) - float(c_sorted[j - 1])) if j > 0 else abs(float(c_sorted[1]) - float(c_sorted[0]))
+    gap_r = (
+        abs(float(c_sorted[j + 1]) - float(c_sorted[j])) if j < c_count - 1 else abs(float(c_sorted[-1]) - float(c_sorted[-2]))
+    )
+    x_lo = 0.5 * (float(c_sorted[j - 1]) + float(c_sorted[j])) if j > 0 else float(c_sorted[0]) - 0.5 * gap_l
+    x_hi = 0.5 * (float(c_sorted[j]) + float(c_sorted[j + 1])) if j < c_count - 1 else float(c_sorted[j]) + 0.5 * gap_r
+    if x_hi <= x_lo:
+        x_lo, x_hi = float(c_sorted[j]) - 260.0, float(c_sorted[j]) + 260.0
+    return (x_lo, x_hi)
+
+
+def _beam_row_cluster_zone_slot_centroids_x(
+    band_row: list[dict[str, Any]],
+    centers: list[float],
+    col_j: int,
+    slots: list[tuple[str, str]],
+) -> list[float | None]:
+    """부위 띠 행에서 열 col_j 텍스트를 zone_key로 묶어 삽입점 X 중심(슬롯별)."""
+    if not band_row or not slots:
+        return []
+    _lab, by_col = _beam_row_partition_label_and_col_entities(band_row, centers)
+    if col_j < 0 or col_j >= len(by_col):
+        return [None] * len(slots)
+    by_zk: dict[str, list[dict[str, Any]]] = {}
+    for e in by_col[col_j]:
+        t = str(e.get("text") or "").strip()
+        z = _beam_vertical_zone_from_label(t)
+        if z:
+            by_zk.setdefault(z, []).append(e)
+    out: list[float | None] = []
+    for _raw_tok, zk in slots:
+        pool = by_zk.get(zk) or []
+        cc = _beam_centroid_entities(pool) if pool else None
+        out.append(float(cc[0]) if cc else None)
+    return out
+
+
+def _beam_row_cluster_fill_slot_xs(
+    xs: list[float | None],
+    x_lo: float,
+    x_hi: float,
+) -> list[float]:
+    """None 슬롯은 동일 간격으로 x_lo~x_hi 사이에 배치."""
+    n = len(xs)
+    if n <= 0:
+        return []
+    known_idx = [i for i, v in enumerate(xs) if v is not None]
+    if len(known_idx) == n:
+        return [float(xs[i]) for i in range(n)]  # type: ignore[list-item]
+    filled = [float(x) if x is not None else None for x in xs]
+    unk = [i for i in range(n) if filled[i] is None]
+    if not unk:
+        return [float(x) for x in filled]  # type: ignore[arg-type]
+    span = max(x_hi - x_lo, 120.0)
+    if not known_idx:
+        for k, ii in enumerate(unk):
+            filled[ii] = x_lo + (k + 0.5) * span / max(len(unk), 1)
+        return [float(x) for x in filled]  # type: ignore[arg-type]
+    # 일부만 알려진 경우: 구간을 나눠 균등 배치(단순)
+    for k, ii in enumerate(unk):
+        filled[ii] = x_lo + (k + 1.0) * span / (len(unk) + 1)
+    return [float(x) for x in filled]  # type: ignore[arg-type]
+
+
+def _beam_row_cluster_zone_spans_rows(
+    block_rows: list[list[dict[str, Any]]],
+    centers: list[float],
+) -> list[tuple[str | None, str | None, list[list[dict[str, Any]]]]] | None:
+    """부위(INT/CENTER/END…) 라벨 행마다 세로 구간을 나눈다. high Y → low Y."""
+    rows_sorted = sorted(block_rows or [], key=lambda br: -_beam_cluster_row_mean_y(br))
+    segments: list[tuple[str | None, str | None, list[list[dict[str, Any]]]]] = []
+    cur_key: str | None = None
+    cur_disp: str | None = None
+    buf: list[list[dict[str, Any]]] = []
+    any_zone = False
+
+    def flush() -> None:
+        nonlocal buf, cur_key, cur_disp
+        if not buf:
+            return
+        segments.append((cur_key, cur_disp, buf))
+        buf = []
+
+    for row in rows_sorted:
+        lab, cells = _beam_row_label_and_cells_by_mark_centers(row, centers)
+        blob = " ".join([lab] + [str(c or "").strip() for c in cells if str(c or "").strip()]).strip()
+        z = _beam_vertical_zone_from_label(lab)
+        if z not in _BEAM_ROW_CLUSTER_ZONE_SPAN_KEYS:
+            z = _beam_vertical_zone_from_label(blob)
+        if z not in _BEAM_ROW_CLUSTER_ZONE_SPAN_KEYS:
+            # 부호열 분리 전(가로띠 한 줄)에서만 INT 등이 잡히는 도면
+            lab2, val2, _l2, _r2 = _beam_row_split_label_value_row(row)
+            z = _beam_vertical_zone_from_label(f"{lab2} {val2}".strip())
+        if z in _BEAM_ROW_CLUSTER_ZONE_SPAN_KEYS:
+            any_zone = True
+            flush()
+            cur_key = z
+            cur_disp = (lab or blob or "").strip()[:80] or str(z).upper()
+            buf = [row]
+        else:
+            buf.append(row)
+    flush()
+    if not any_zone:
+        return None
+    return segments
+
+
+def _beam_cluster_col_y_bounds_in_rows(
+    centers: list[float],
+    seg_rows: list[list[dict[str, Any]]],
+    col_j: int,
+) -> tuple[float, float] | None:
+    """한 부위 구간 안에서 특정 부호 열(col_j) 텍스트의 Y min/max."""
+    ys: list[float] = []
+    for row in seg_rows or []:
+        _lab, by_col = _beam_row_partition_label_and_col_entities(row, centers)
+        if col_j < 0 or col_j >= len(by_col):
+            continue
+        for e in by_col[col_j]:
+            try:
+                ys.append(float(e["y"]))
+            except (TypeError, KeyError, ValueError):
+                continue
+    if not ys:
+        return None
+    return (min(ys), max(ys))
 
 
 def _bbox_union_from_entities(ents: list[dict[str, Any]]) -> list[float] | None:
@@ -3507,6 +3773,124 @@ def _bbox_union_from_entities(ents: list[dict[str, Any]]) -> list[float] | None:
     if not xs or not ys:
         return None
     return [round(min(xs), 4), round(min(ys), 4), round(max(xs), 4), round(max(ys), 4)]
+
+
+def _beam_row_cluster_entities_in_y_span(
+    ents: list[dict[str, Any]],
+    y_lo: float,
+    y_hi: float,
+    *,
+    pad: float = 80.0,
+) -> list[dict[str, Any]]:
+    """부위 세로 구간(y_lo~y_hi)에 걸리는 TEXT만 모아, 존별 X·bbox를 열 전체와 분리할 때 사용."""
+    lo = float(y_lo) - float(pad)
+    hi = float(y_hi) + float(pad)
+    out: list[dict[str, Any]] = []
+    for e in ents or []:
+        try:
+            y = float(e["y"])
+        except (TypeError, KeyError, ValueError):
+            continue
+        if lo <= y <= hi:
+            out.append(e)
+    return out
+
+
+def _beam_row_cluster_x_histogram_peak_centers(
+    ents: list[dict[str, Any]],
+    *,
+    bin_width: float,
+    column_center_x: float,
+    num_peaks: int,
+) -> list[float]:
+    """
+    열 전체 TEXT의 X 히스토그램에서 건수 상위 num_peaks개 빈의 중심 X(최빈 → 차순).
+    부위 개수만큼 서로 다른 삽입점 군집이 있을 때 각각의 대표 X 후보가 된다.
+    """
+    if num_peaks < 1 or not ents:
+        return []
+    xs: list[float] = []
+    for it in ents:
+        try:
+            xs.append(float(it["x"]))
+        except (TypeError, KeyError, ValueError):
+            continue
+    if not xs:
+        return []
+    if len(xs) == 1:
+        return [xs[0]]
+    x_min = min(xs)
+    x_max = max(xs)
+    span = x_max - x_min
+    bw = max(28.0, min(float(bin_width), max(40.0, span / 8.0 + 1e-6)))
+    buckets: dict[int, list[float]] = {}
+    for xv in xs:
+        bi = int((xv - x_min) // bw)
+        buckets.setdefault(bi, []).append(xv)
+
+    def bin_sort_key(kv: tuple[int, list[float]]) -> tuple[int, float]:
+        bi, xvs = kv
+        mx = sum(xvs) / len(xvs)
+        return (-len(xvs), abs(mx - float(column_center_x)))
+
+    ranked = sorted(buckets.items(), key=bin_sort_key)
+    centers: list[float] = []
+    for _bi, xvs in ranked:
+        if len(centers) >= num_peaks:
+            break
+        centers.append(sum(xvs) / len(xvs))
+    centers.sort()
+    return centers
+
+
+def _beam_row_cluster_resolve_zone_centroids_modal(
+    c_sorted: list[float],
+    col_j: int,
+    column_ents: list[dict[str, Any]],
+    recs: list[dict[str, Any]],
+    *,
+    bin_width: float,
+) -> None:
+    """
+    세로 존별 1차 힌트는 `_beam_row_cluster_centroid_xy_mode_x`(존 Y필터 후)로 이미 rec에 들어 있다.
+    같은 열에 존이 여러 개이면, 열 전체 X 히스토그램에서 상위 K개 최빈 빈 중심을 뽑고,
+    힌트 X와 빈 중심을 각각 X 오름차순으로 정렬해 i번째끼리 대응(1차원 최적 배치).
+    최빈 빈이 하나로만 나오면 열 내 가로 허용구간 균등 분할로 폴백.
+    """
+    n = len(recs)
+    if n < 2:
+        return
+    hints: list[float] = []
+    for r in recs:
+        v = r.get("_beam_row_cluster_centroid_x")
+        if v is None:
+            return
+        hints.append(float(v))
+    cx = float(c_sorted[col_j])
+    x_lo, x_hi = _beam_row_cluster_col_x_inner_span(c_sorted, col_j)
+    span = max(float(x_hi) - float(x_lo), 120.0)
+    min_spread = max(28.0, 0.025 * span)
+
+    peaks = _beam_row_cluster_x_histogram_peak_centers(
+        column_ents,
+        bin_width=bin_width,
+        column_center_x=cx,
+        num_peaks=n,
+    )
+    # 상위 K개 빈이 실제로 가로로 갈라져야 의미 있음 — 한 덩어리면 폴백
+    if (
+        len(peaks) < n
+        or (max(peaks) - min(peaks)) < min_spread
+    ):
+        filled = _beam_row_cluster_fill_slot_xs([None] * n, x_lo, x_hi)
+        for r, xf in zip(recs, filled):
+            r["_beam_row_cluster_centroid_x"] = round(float(xf), 4)
+        return
+
+    peaks_sorted = sorted(peaks[:n])
+    idx_order = sorted(range(n), key=lambda i: hints[i])
+    for rank, ii in enumerate(idx_order):
+        recs[ii]["_beam_row_cluster_centroid_x"] = round(float(peaks_sorted[rank]), 4)
 
 
 def _beam_row_split_label_value_row(
@@ -3668,16 +4052,101 @@ def _beam_row_cluster_block_y_bounds(
     return (min(ys), max(ys))
 
 
+def _beam_row_cluster_per_column_zone_labels(
+    block_rows: list[list[dict[str, Any]]],
+    centers: list[float],
+) -> list[str | None] | None:
+    """R# 띠처럼 한 줄이 거의 전부 ALL/END/CEN… 일 때 열별 부위 문자열(클러스터와 동일 소스)."""
+    if not block_rows or not centers:
+        return None
+    best_row = _beam_row_cluster_zone_band_row(block_rows, centers)
+    if best_row is None:
+        return None
+    _lab, cells = _beam_row_label_and_cells_by_mark_centers(best_row, centers)
+    if len(cells) < len(centers):
+        return None
+    out: list[str | None] = []
+    for j in range(len(centers)):
+        c = str(cells[j] or "").strip()
+        out.append(c if c else None)
+    return out
+
+
 def _beam_row_cluster_synth_strips_and_headers(
     rows_out: list[dict[str, Any]],
     match_lines: list[dict[str, Any]],
 ) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
     """
     Y행 묶음 번들은 세로 블록용 strip/헤더가 비어 있어 단면 enrich가 스킵된다.
-    매칭 폴리라인(또는 블록 텍스트 중심)으로 스트립 X·합성 '형 태' 헤더 Y를 만든다.
+    가로 다열(부호 열마다 X가 다름)일 때 **세그먼트당 한 스트립**이면 단면 X가 한곳으로만 잡혀
+    모든 부호가 같은 단면을 공유한다 → (세그먼트, 열)마다 스트립을 평탄화한다.
     """
     if not rows_out:
         return [], []
+    ys_mean: list[float] = []
+    for r in rows_out:
+        ry = r.get("row_y_mean")
+        if ry is not None:
+            try:
+                ys_mean.append(float(ry))
+            except (TypeError, ValueError):
+                pass
+    y_tmpl = (max(ys_mean) + 280.0) if ys_mean else 0.0
+    field_headers = [
+        {"key": "section_shape", "label": "형 태", "y": round(float(y_tmpl), 4)},
+    ]
+
+    bundle = [r for r in rows_out if str(r.get("beam_row_role") or "") == "beam_row_cluster_bundle"]
+    if bundle:
+
+        def _seg_col_slot_x(rr: dict[str, Any]) -> tuple[int, int, int, float]:
+            try:
+                s0 = int(rr.get("beam_row_cluster_segment_index", rr.get("beam_bundle_segment_index", 0)))
+            except (TypeError, ValueError):
+                s0 = 0
+            try:
+                c0 = int(rr.get("beam_row_cluster_column_index", 0))
+            except (TypeError, ValueError):
+                c0 = 0
+            try:
+                zslot = int(rr.get("beam_row_cluster_zone_slot", 0))
+            except (TypeError, ValueError):
+                zslot = 0
+            xc0 = 0.0
+            v = rr.get("_beam_row_cluster_centroid_x")
+            if v is not None:
+                try:
+                    xc0 = float(v)
+                except (TypeError, ValueError):
+                    pass
+            if xc0 == 0.0:
+                bb = rr.get("row_entity_bbox")
+                if isinstance(bb, (list, tuple)) and len(bb) >= 4:
+                    try:
+                        xc0 = 0.5 * (float(bb[0]) + float(bb[2]))
+                    except (TypeError, ValueError):
+                        pass
+            return (s0, c0, zslot, xc0)
+
+        seen: dict[tuple[int, int, int], int] = {}
+        strip_infos: list[dict[str, Any]] = []
+        for r in sorted(bundle, key=_seg_col_slot_x):
+            s0, c0, zslot, xc0 = _seg_col_slot_x(r)
+            key = (s0, c0, zslot)
+            if key not in seen:
+                seen[key] = len(strip_infos)
+                strip_infos.append(
+                    {
+                        "index": len(strip_infos),
+                        "x_center": round(float(xc0), 4),
+                        "entity_count": 0,
+                    }
+                )
+            fi = seen[key]
+            r["beam_bundle_segment_index"] = int(fi)
+            r["beam_vertical_merged_strip_indices"] = [int(fi)]
+        return field_headers, strip_infos
+
     xc_by_si: dict[int, float] = {}
     for line in match_lines or []:
         try:
@@ -3703,7 +4172,7 @@ def _beam_row_cluster_synth_strips_and_headers(
         except (TypeError, ValueError):
             si = 0
         max_si = max(max_si, si)
-    strip_infos: list[dict[str, Any]] = []
+    strip_infos = []
     for si in range(max_si + 1):
         xc = float(xc_by_si.get(si) or 0.0)
         if xc == 0.0:
@@ -3722,18 +4191,6 @@ def _beam_row_cluster_synth_strips_and_headers(
                         pass
                 break
         strip_infos.append({"index": si, "x_center": xc, "entity_count": 0})
-    ys_mean: list[float] = []
-    for r in rows_out:
-        ry = r.get("row_y_mean")
-        if ry is not None:
-            try:
-                ys_mean.append(float(ry))
-            except (TypeError, ValueError):
-                pass
-    y_tmpl = (max(ys_mean) + 280.0) if ys_mean else 0.0
-    field_headers = [
-        {"key": "section_shape", "label": "형 태", "y": round(float(y_tmpl), 4)},
-    ]
     return field_headers, strip_infos
 
 
@@ -3780,11 +4237,37 @@ def extract_beam_row_cluster_bundle(
             if not rec:
                 continue
             rec["beam_bundle_segment_index"] = si
+            rec["beam_row_cluster_segment_index"] = int(si)
+            rec["beam_row_cluster_column_index"] = 0
             rec["beam_vertical_merged_strip_indices"] = [int(si)]
             yb = _beam_row_cluster_block_y_bounds(block)
             if yb is not None:
                 rec["row_data_anchor_y_bounds"] = [round(float(yb[0]), 4), round(float(yb[1]), 4)]
-            cc = _beam_centroid_entities([it for row in block for it in (row or [])])
+            flat_ents = [it for row in block for it in (row or [])]
+            # flat 단일 단면 파이프라인용: row_cluster_bundle(단일 열)도 텍스트 원본을 제공한다.
+            # (서버 flat enrich에서 x-slab 분할/부재·부위/하단텍스트 매칭에 사용)
+            try:
+                rec["_flat_sorted_entities"] = [
+                    {
+                        "x": round(float(it["x"]), 4),
+                        "y": round(float(it["y"]), 4),
+                        "text": str(it.get("text") or ""),
+                        "id": it.get("id"),
+                    }
+                    for it in sorted(flat_ents, key=lambda e: float(e.get("x") or 0))
+                    if it is not None and it.get("x") is not None and it.get("y") is not None
+                ]
+            except Exception:
+                rec.pop("_flat_sorted_entities", None)
+            xs_flat: list[float] = []
+            for it in flat_ents:
+                try:
+                    xs_flat.append(float(it["x"]))
+                except (TypeError, KeyError, ValueError):
+                    continue
+            span_x = (max(xs_flat) - min(xs_flat)) if len(xs_flat) >= 2 else 0.0
+            bin_w0 = max(52.0, min(130.0, 0.34 * span_x + 14.0)) if span_x > 1.0 else 88.0
+            cc = _beam_row_cluster_centroid_xy_mode_x(flat_ents, bin_width=bin_w0, column_center_x=None)
             if cc:
                 rec["_beam_row_cluster_centroid_x"] = round(float(cc[0]), 4)
                 rec["_beam_row_cluster_centroid_y"] = round(float(cc[1]), 4)
@@ -3809,6 +4292,9 @@ def extract_beam_row_cluster_bundle(
         c_sorted = sorted(float(x) for x in centers)
         c_count = len(c_sorted)
         ents_by_col: list[list[dict[str, Any]]] = [[] for _ in range(c_count)]
+        # flat 단면(x-slab) 분할·부재/부위 텍스트 매칭에는 END/CEN/INT 같은 “값이 아닌 텍스트”도 필요하다.
+        # 기존 ents_by_col 은 라벨/값 분리 필터로 인해 이런 토큰이 빠질 수 있어, 원본용 all 리스트를 따로 유지한다.
+        ents_by_col_all: list[list[dict[str, Any]]] = [[] for _ in range(c_count)]
         if c_count >= 2:
             dx = max(1.0, c_sorted[1] - c_sorted[0])
             x_label_hi = c_sorted[0] - max(120.0, min(420.0, dx * 0.45))
@@ -3827,45 +4313,236 @@ def extract_beam_row_cluster_bundle(
                     continue
                 j = min(range(c_count), key=lambda k: abs(x - c_sorted[k]))
                 ents_by_col[j].append(e)
+        # all: 라벨/값 필터 없이 “열 근처” 텍스트를 최대한 보존 (flat x-slab·부위 앵커용)
+        for row in rows_sorted:
+            for e in row or []:
+                t = str(e.get("text") or "").strip()
+                if not t:
+                    continue
+                try:
+                    x = float(e["x"])
+                except (TypeError, KeyError, ValueError):
+                    continue
+                if x <= x_label_hi:
+                    continue
+                j = min(range(c_count), key=lambda k: abs(x - c_sorted[k]))
+                ents_by_col_all[j].append(e)
+
+        gap_all: list[float] = []
+        for jj in range(c_count - 1):
+            gap_all.append(abs(c_sorted[jj + 1] - c_sorted[jj]))
+        fallback_bin = max(50.0, min(120.0, min(gap_all) * 0.58)) if gap_all else 88.0
 
         yb = _beam_row_cluster_block_y_bounds(block)
+        zone_spans = _beam_row_cluster_zone_spans_rows(block, centers)
+        zone_labels_per_col = _beam_row_cluster_per_column_zone_labels(block, centers)
+        poly_once_per_col: set[tuple[int, int, int]] = set()
+        band_row = _beam_row_cluster_zone_band_row(block, centers)
+
         for j in range(c_count):
-            rec: dict[str, Any] = {
-                "category": CATEGORY_BEAM,
-                "wall_mode": cfg.wall_mode,
-                "beam_layout": "row_cluster_bundle",
-                "beam_row_role": "beam_row_cluster_bundle",
-                "beam_field_titles": titles,
-                "beam_field_key_order": order,
-                "cells": [matrix[fi][j] if fi < len(matrix) and j < len(matrix[fi]) else "" for fi in range(len(order))],
-                "beam_bundle_segment_index": si,
-                "beam_vertical_merged_strip_indices": [int(si)],
-            }
-            if cfg.building_tag:
-                rec["building"] = cfg.building_tag
-            mk = _first_flat_row_mark(rec["cells"])
-            if mk:
-                rec["mark"] = mk
-                rec["name"] = mk
-                rec["member_label"] = mk
+            col_zone_recs: list[dict[str, Any]] = []
+            cells_col = [
+                matrix[fi][j] if fi < len(matrix) and j < len(matrix[fi]) else ""
+                for fi in range(len(order))
+            ]
+            zcell = ""
+            if zone_labels_per_col and j < len(zone_labels_per_col) and zone_labels_per_col[j]:
+                zcell = str(zone_labels_per_col[j]).strip()
 
-            _enrich_beam_vertical_record(rec)
-            if yb is not None:
-                rec["row_data_anchor_y_bounds"] = [round(float(yb[0]), 4), round(float(yb[1]), 4)]
+            hz_slots = _beam_row_cluster_parse_horizontal_zone_slots(zcell)
+            multi_horizontal = len(hz_slots) >= 2
 
-            bb = _bbox_union_from_entities(ents_by_col[j])
-            if bb is not None:
-                rec["row_entity_bbox"] = bb
-            cc = _beam_centroid_entities(ents_by_col[j])
-            if cc:
-                rec["_beam_row_cluster_centroid_x"] = round(float(cc[0]), 4)
-                rec["_beam_row_cluster_centroid_y"] = round(float(cc[1]), 4)
+            zone_y_specs: list[tuple[str | None, str | None, tuple[float, float] | None]]
+            if zone_spans:
+                seen_sig: set[tuple[float, float, str]] = set()
+                zone_y_specs = []
+                for zk, zdisp, zrows in zone_spans:
+                    yb_z = _beam_cluster_col_y_bounds_in_rows(centers, zrows, j)
+                    if yb_z is None or yb_z[1] <= yb_z[0] + 0.5:
+                        yb_use = yb
+                    else:
+                        yb_use = yb_z
+                    if yb_use is None:
+                        continue
+                    sig = (
+                        round(float(yb_use[0]), 2),
+                        round(float(yb_use[1]), 2),
+                        str(zk or ""),
+                    )
+                    if sig in seen_sig:
+                        continue
+                    seen_sig.add(sig)
+                    zone_y_specs.append((zk, zdisp, yb_use))
+                if not zone_y_specs:
+                    zone_y_specs = [(None, None, yb)]
+            else:
+                zone_y_specs = [(None, None, yb)]
 
-            if _beam_vertical_record_useful(rec):
+            yb_col = _beam_cluster_col_y_bounds_in_rows(centers, rows_sorted, j)
+            if yb_col is None or yb_col[1] <= yb_col[0] + 0.5:
+                yb_col = yb
+
+            x_span_lo, x_span_hi = _beam_row_cluster_col_x_inner_span(c_sorted, j)
+            hz_xs: list[float] | None = None
+            if multi_horizontal and band_row is not None:
+                raw_xs = _beam_row_cluster_zone_slot_centroids_x(band_row, centers, j, hz_slots)
+                pad = [None] * max(0, len(hz_slots) - len(raw_xs))
+                hz_xs = _beam_row_cluster_fill_slot_xs(list(raw_xs) + pad, x_span_lo, x_span_hi)
+            elif multi_horizontal:
+                hz_xs = _beam_row_cluster_fill_slot_xs([None] * len(hz_slots), x_span_lo, x_span_hi)
+
+            if multi_horizontal:
+                zone_loop = [(None, (zcell or "")[:80] if zcell else None, yb_col)]
+            else:
+                zone_loop = list(zone_y_specs)
+
+            gaps_j_pre: list[float] = []
+            if j > 0:
+                gaps_j_pre.append(abs(c_sorted[j] - c_sorted[j - 1]))
+            if j < c_count - 1:
+                gaps_j_pre.append(abs(c_sorted[j + 1] - c_sorted[j]))
+            bin_w_col = max(42.0, min(145.0, (min(gaps_j_pre) if gaps_j_pre else fallback_bin) * 0.58))
+
+            for zyi, (zk_sp, zdisp_sp, yb_use) in enumerate(zone_loop):
+                if multi_horizontal:
+                    slot_entries: list[tuple[int, str, str, float]] = []
+                    assert hz_xs is not None
+                    for hi, ((raw_tok, zk_h), xh) in enumerate(zip(hz_slots, hz_xs)):
+                        slot_entries.append((hi, raw_tok, zk_h, float(xh)))
+                else:
+                    slot_entries = [(zyi, "", zk_sp, None)]
+
+                for slot_idx, raw_tok, zk_slot_pass, xh_opt in slot_entries:
+                    zk_final = zk_slot_pass if zk_slot_pass else zk_sp
+                    if multi_horizontal:
+                        zdisp_final = (raw_tok or "").strip()[:80] or (zdisp_sp or "") or ""
+                        zk_eff = (str(zk_final).strip() if zk_final is not None else "") or None
+                    else:
+                        zdisp_final = (zdisp_sp or "") or ""
+                        zk_eff = zk_sp if zk_sp else (str(zk_final).strip() if zk_final is not None else None)
+                        if not zdisp_final and zcell and not zk_eff:
+                            zdisp_final = zcell[:80]
+
+                    rec: dict[str, Any] = {
+                        "category": CATEGORY_BEAM,
+                        "wall_mode": cfg.wall_mode,
+                        "beam_layout": "row_cluster_bundle",
+                        "beam_row_role": "beam_row_cluster_bundle",
+                        "beam_field_titles": titles,
+                        "beam_field_key_order": order,
+                        "cells": list(cells_col),
+                        "beam_bundle_segment_index": si,
+                        "beam_row_cluster_segment_index": int(si),
+                        "beam_row_cluster_column_index": int(j),
+                        "beam_row_cluster_zone_slot": int(slot_idx),
+                        "beam_vertical_merged_strip_indices": [int(si)],
+                    }
+                    if cfg.building_tag:
+                        rec["building"] = cfg.building_tag
+                    mk = _first_flat_row_mark(rec["cells"])
+                    if mk:
+                        rec["mark"] = mk
+                        rec["name"] = mk
+                        rec["member_label"] = mk
+
+                    _enrich_beam_vertical_record(rec)
+                    if yb_use is not None:
+                        rec["row_data_anchor_y_bounds"] = [
+                            round(float(yb_use[0]), 4),
+                            round(float(yb_use[1]), 4),
+                        ]
+                        mid_y = 0.5 * (float(yb_use[0]) + float(yb_use[1]))
+                        rec["row_y_mean"] = round(mid_y, 4)
+                        rec["row_section_anchor_y"] = round(mid_y, 4)
+                    if zk_eff:
+                        rec["beam_vertical_zone_key"] = zk_eff
+                    disp_for_rec = zdisp_final
+                    if multi_horizontal and disp_for_rec:
+                        rec["beam_vertical_zone_display_label"] = disp_for_rec
+                    elif zk_eff and zdisp_sp and not multi_horizontal:
+                        rec["beam_vertical_zone_display_label"] = (zdisp_sp or "")[:80]
+                    if not multi_horizontal and (not rec.get("beam_vertical_zone_display_label")) and zcell:
+                        rec["beam_vertical_zone_display_label"] = zcell[:80]
+                    if not multi_horizontal and zcell and (not rec.get("beam_vertical_zone_key")):
+                        zk2 = _beam_vertical_zone_from_label(zcell)
+                        if zk2:
+                            rec["beam_vertical_zone_key"] = zk2
+
+                    ents_geo = ents_by_col[j]
+                    if yb_use is not None and not multi_horizontal:
+                        y0u, y1u = float(yb_use[0]), float(yb_use[1])
+                        if y1u > y0u + 1.0:
+                            sub_geo = _beam_row_cluster_entities_in_y_span(ents_by_col[j], y0u, y1u)
+                            if sub_geo:
+                                ents_geo = sub_geo
+                    # flat 단일 단면 파이프라인용: (세그먼트, 열, 존)별 텍스트 원본 제공
+                    ents_src = ents_by_col_all[j]
+                    if yb_use is not None and not multi_horizontal:
+                        y0u, y1u = float(yb_use[0]), float(yb_use[1])
+                        if y1u > y0u + 1.0:
+                            sub_all = _beam_row_cluster_entities_in_y_span(ents_by_col_all[j], y0u, y1u)
+                            if sub_all:
+                                ents_src = sub_all
+                    try:
+                        rec["_flat_sorted_entities"] = [
+                            {
+                                "x": round(float(it["x"]), 4),
+                                "y": round(float(it["y"]), 4),
+                                "text": str(it.get("text") or ""),
+                                "id": it.get("id"),
+                            }
+                            for it in sorted(ents_src, key=lambda e: float(e.get("x") or 0))
+                            if it is not None and it.get("x") is not None and it.get("y") is not None
+                        ]
+                    except Exception:
+                        rec.pop("_flat_sorted_entities", None)
+                    bb = _bbox_union_from_entities(ents_geo)
+                    if bb is not None:
+                        rec["row_entity_bbox"] = bb
+                    cc = _beam_row_cluster_centroid_xy_mode_x(
+                        ents_geo,
+                        bin_width=bin_w_col,
+                        column_center_x=float(c_sorted[j]),
+                    )
+                    if cc:
+                        if multi_horizontal and xh_opt is not None:
+                            rec["_beam_row_cluster_centroid_x"] = round(float(xh_opt), 4)
+                        else:
+                            rec["_beam_row_cluster_centroid_x"] = round(float(cc[0]), 4)
+                        rec["_beam_row_cluster_centroid_y"] = round(float(cc[1]), 4)
+
+                    if _beam_vertical_record_useful(rec):
+                        if multi_horizontal:
+                            rows_out.append(rec)
+                            pk = (int(si), int(j), int(slot_idx))
+                            if pk not in poly_once_per_col:
+                                poly = _beam_row_bundle_match_line_for_segment(block, rec, si)
+                                if poly:
+                                    match_lines.append(poly)
+                                    poly_once_per_col.add(pk)
+                        else:
+                            col_zone_recs.append(rec)
+
+            if not multi_horizontal and len(col_zone_recs) >= 2:
+                _beam_row_cluster_resolve_zone_centroids_modal(
+                    c_sorted,
+                    j,
+                    ents_by_col[j],
+                    col_zone_recs,
+                    bin_width=bin_w_col,
+                )
+            for rec in col_zone_recs:
                 rows_out.append(rec)
-                poly = _beam_row_bundle_match_line_for_segment(block, rec, si)
-                if poly:
-                    match_lines.append(poly)
+                try:
+                    slot_flush = int(rec.get("beam_row_cluster_zone_slot", 0))
+                except (TypeError, ValueError):
+                    slot_flush = 0
+                pk = (int(si), int(j), int(slot_flush))
+                if pk not in poly_once_per_col:
+                    poly = _beam_row_bundle_match_line_for_segment(block, rec, si)
+                    if poly:
+                        match_lines.append(poly)
+                        poly_once_per_col.add(pk)
 
     meta["beam_vertical_member_zone_match_lines"] = match_lines
     fh_syn, strips_syn = _beam_row_cluster_synth_strips_and_headers(rows_out, match_lines)
@@ -4070,4 +4747,5 @@ def beam_duplicate_key(r: dict[str, Any]) -> tuple[Any, ...]:
             "ext_bot_bar",
         )
     )
-    return (mark, w, d, sig)
+    zk = str(r.get("beam_vertical_zone_key") or "").strip()
+    return (mark, w, d, sig, zk)

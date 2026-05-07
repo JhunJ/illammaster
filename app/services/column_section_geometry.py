@@ -33,11 +33,17 @@ except ImportError:
     from shapely.wkt import loads as shapely_from_wkt
 
 from app.models import BlockDef, BlockInsert, Entity
+from app.services.beam_flat_below_text import (
+    beam_flat_fill_below_text_role_values_from_entities,
+    beam_flat_parse_member_mark_dims,
+)
 from app.services.beam_flat_spatial import (
+    RE_FLAT_BEAM_MARK,
     beam_flat_row_has_beam_mark,
     beam_flat_schedule_tight_y_bounds,
     beam_flat_section_focus_y_bounds,
     beam_flat_x_slabs,
+    is_flat_zone_anchor_text,
 )
 from app.utils.geom import transform_block_wkt_to_world
 
@@ -2160,6 +2166,130 @@ def _section_template_y(field_headers: list[dict[str, Any]] | None) -> float | N
     return None
 
 
+def _beam_flat_section_center_xy(section_geometry: dict[str, Any] | None) -> tuple[float, float] | None:
+    sg = section_geometry if isinstance(section_geometry, dict) else {}
+    for key in ("search_bbox", "search_bbox_loose"):
+        bb = sg.get(key)
+        if isinstance(bb, (list, tuple)) and len(bb) >= 4:
+            try:
+                x0, y0, x1, y1 = float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])
+                return (0.5 * (x0 + x1), 0.5 * (y0 + y1))
+            except (TypeError, ValueError):
+                continue
+    return None
+
+
+def _beam_flat_enrich_zone_metadata(
+    orig_row: dict[str, Any],
+    zone_entry: dict[str, Any],
+    flat_entities: list[dict[str, Any]],
+) -> None:
+    """슬랩(존) 단위로 부재명·부위·하단 텍스트 스키마를 채운다."""
+    bb = zone_entry.get("row_entity_bbox")
+    if not isinstance(bb, (list, tuple)) or len(bb) < 4:
+        return
+    try:
+        lo_x, lo_y, hi_x, hi_y = float(bb[0]), float(bb[1]), float(bb[2]), float(bb[3])
+    except (TypeError, ValueError):
+        return
+    if hi_x <= lo_x:
+        return
+
+    sg = zone_entry.get("section_geometry") if isinstance(zone_entry.get("section_geometry"), dict) else {}
+    cen = _beam_flat_section_center_xy(sg)
+    if cen is None:
+        cen = (0.5 * (lo_x + hi_x), 0.5 * (lo_y + hi_y))
+    sec_cx, sec_cy = cen
+
+    marks: list[tuple[float, float, str]] = []
+    zones: list[tuple[float, float, str]] = []
+    for e in flat_entities or []:
+        if not isinstance(e, dict):
+            continue
+        try:
+            xe, ye = float(e["x"]), float(e["y"])
+        except (TypeError, KeyError, ValueError):
+            continue
+        if xe < lo_x - 120.0 or xe > hi_x + 120.0:
+            continue
+        t = str(e.get("text") or "").strip()
+        if not t:
+            continue
+        tn = re.sub(r"\s+", " ", t)
+        if len(tn) <= 48 and RE_FLAT_BEAM_MARK.match(tn) and re.search(r"\d", tn):
+            marks.append((xe, ye, tn))
+        if is_flat_zone_anchor_text(tn):
+            zones.append((xe, ye, tn))
+
+    zone_txt = ""
+    zone_anchor: tuple[float, float] | None = None
+    if zones:
+        zones.sort(key=lambda z: abs(z[0] - sec_cx) * 0.85 + abs(z[1] - sec_cy) * 0.12)
+        zone_txt = zones[0][2]
+        zone_anchor = (zones[0][0], zones[0][1])
+
+    best_mk: tuple[float, str, float, float] | None = None
+    for xe, ye, tn in marks:
+        if ye <= sec_cy + 20.0:
+            continue
+        dy = ye - sec_cy
+        dx = abs(xe - sec_cx)
+        sc = dy + dx * 0.2
+        if best_mk is None or sc < best_mk[0]:
+            best_mk = (sc, tn, xe, ye)
+
+    mark_txt = ""
+    mark_dims: dict[str, int] | None = None
+    mark_anchor: tuple[float, float] | None = None
+    if best_mk:
+        mark_txt = best_mk[1]
+        mark_anchor = (best_mk[2], best_mk[3])
+        md = beam_flat_parse_member_mark_dims(mark_txt)
+        if md:
+            mark_dims = md
+    if not mark_txt:
+        for k in ("mark", "name", "member_label"):
+            t = str(orig_row.get(k) or "").strip()
+            if not t:
+                continue
+            mark_txt = re.sub(r"\s+", " ", t)
+            md = beam_flat_parse_member_mark_dims(mark_txt)
+            if md:
+                mark_dims = md
+            break
+
+    if not zone_txt:
+        z2 = str(orig_row.get("beam_vertical_zone_display_label") or "").strip()
+        if z2:
+            zone_txt = z2
+
+    zone_entry["member_mark_text"] = mark_txt
+    zone_entry["member_zone_text"] = zone_txt
+    if mark_dims:
+        zone_entry["member_mark_dims"] = mark_dims
+    if mark_anchor is not None:
+        zone_entry["member_mark_anchor"] = {"x": round(float(mark_anchor[0]), 4), "y": round(float(mark_anchor[1]), 4)}
+    if zone_anchor is not None:
+        zone_entry["member_zone_anchor"] = {"x": round(float(zone_anchor[0]), 4), "y": round(float(zone_anchor[1]), 4)}
+    # 단면 중심(서버)도 함께 노출 — 프론트 picked/연결선 승격에 사용
+    try:
+        zone_entry["section_center"] = {"x": round(float(sec_cx), 4), "y": round(float(sec_cy), 4)}
+    except (TypeError, ValueError):
+        pass
+
+    bt = beam_flat_fill_below_text_role_values_from_entities(
+        flat_entities,
+        sg,
+        slab_x_lo=lo_x,
+        slab_x_hi=hi_x,
+    )
+    zone_entry["below_text_role_values"] = dict(bt.get("below_text_role_values") or {})
+    zone_entry["below_text_chain_values"] = list(bt.get("below_text_chain_values") or [])
+    zone_entry["below_text_hit_count"] = int(bt.get("below_text_hit_count") or 0)
+    zone_entry["below_text_match_count"] = int(bt.get("below_text_match_count") or 0)
+    zone_entry["below_text_dir"] = str(bt.get("below_text_dir") or "")
+
+
 def is_beam_vertical_table_row(r: dict[str, Any]) -> bool:
     """보 세로 블록·가로 묶음 번들·가로 와이드/Location(합성 스트립) — 단면 enrich·클러스터 분기용."""
     bl = str(r.get("beam_layout") or "")
@@ -2204,7 +2334,7 @@ def enrich_rows_beam_flat_section_geometry(
     y_means: list[float] = []
 
     for orig_i, r in enumerate(rows):
-        if str(r.get("beam_row_role") or "") != "beam_flat":
+        if not is_beam_vertical_table_row(r):
             continue
         if not beam_flat_row_has_beam_mark(r):
             r.setdefault(
@@ -2223,6 +2353,8 @@ def enrich_rows_beam_flat_section_geometry(
             base: dict[str, Any],
         ) -> None:
             r2 = dict(base)
+            # 단일 flat 파이프라인: 원·선(circle-first) 분석은 합성 스트립 행에서만 활성화
+            r2["beam_row_role"] = "beam_flat"
             r2["row_entity_bbox"] = [
                 round(lo_x, 4),
                 round(lo_y, 4),
@@ -2351,6 +2483,31 @@ def enrich_rows_beam_flat_section_geometry(
         for k in ("width_mm", "depth_mm", "size_mm", "SIZE"):
             if primary_src and k in primary_src and primary_src.get(k) is not None:
                 rows[orig_i][k] = primary_src[k]
+        flat_ents = rows[orig_i].get("_flat_sorted_entities")
+        if not isinstance(flat_ents, list):
+            flat_ents = []
+        for z in zlist:
+            if isinstance(z, dict):
+                _beam_flat_enrich_zone_metadata(rows[orig_i], z, flat_ents)
+        # 부모 행: 대표 슬랩(첫 ok 단면)의 부재/부위/하단텍스트를 호환 필드로 복제
+        rep_z = next(
+            (z for z in zlist if isinstance(z, dict) and (z.get("section_geometry") or {}).get("ok")),
+            zlist[0] if zlist else None,
+        )
+        if isinstance(rep_z, dict):
+            rows[orig_i]["member_mark_text"] = str(rep_z.get("member_mark_text") or "")
+            rows[orig_i]["member_zone_text"] = str(rep_z.get("member_zone_text") or "")
+            if rep_z.get("member_mark_dims"):
+                rows[orig_i]["member_mark_dims"] = rep_z["member_mark_dims"]
+            btr = rep_z.get("below_text_role_values")
+            if isinstance(btr, dict) and btr:
+                rows[orig_i]["below_text_role_values"] = dict(btr)
+            btc = rep_z.get("below_text_chain_values")
+            if isinstance(btc, list):
+                rows[orig_i]["below_text_chain_values"] = list(btc)
+            rows[orig_i]["below_text_hit_count"] = int(rep_z.get("below_text_hit_count") or 0)
+            rows[orig_i]["below_text_match_count"] = int(rep_z.get("below_text_match_count") or 0)
+            rows[orig_i]["below_text_dir"] = str(rep_z.get("below_text_dir") or "")
         if len(zlist) > 1:
             rows[orig_i]["beam_section_geometry_zones"] = zlist
         else:
@@ -2571,6 +2728,24 @@ def enrich_rows_column_section_geometry(
                 cap_y = max(560.0, min(float(rdp) * 1.22 + 760.0, eff_hh_use, 4200.0))
                 eff_hh_use = min(eff_hh_use, cap_y)
 
+        # 보 세로·번들: SECTION 헤더의 y(y_sec)가 표 블록 기준에 가깝고 `row_data_anchor_y_bounds`는
+        # CAD 월드인 경우가 있어, 느슨 DB 창만 y_center±eff_hh 로 열리면 Y≈0 근처가 된다(원 0건).
+        # 스큐 보정으로 y_anchor 만 행 구간 중앙으로 옮겨도 조회 bbox 세로는 그대로라 실패가 난다.
+        y_center_loose_query = float(y_center)
+        if beam_vb and anchor_y_bounds_arg is not None and len(anchor_y_bounds_arg) >= 2:
+            try:
+                al_b = float(anchor_y_bounds_arg[0])
+                ah_b = float(anchor_y_bounds_arg[1])
+                if ah_b > al_b + 80.0:
+                    y_mid_b = 0.5 * (al_b + ah_b)
+                    span_b = ah_b - al_b
+                    if abs(y_center_loose_query - y_mid_b) > max(
+                        2500.0, span_b * 0.35 + 800.0
+                    ):
+                        y_center_loose_query = y_mid_b
+            except (TypeError, ValueError):
+                pass
+
         yv_clip: tuple[float, float] | None = None
         selected_clip_box: tuple[float, float, float, float] | None = None
         if clip_boxes:
@@ -2592,31 +2767,37 @@ def enrich_rows_column_section_geometry(
                 )
 
         if cache_key not in shapes_by_key:
-            bbox_loose = (
+            auto_bbox = (
                 xc - hw_load,
-                y_center - eff_hh_use,
+                y_center_loose_query - eff_hh_use,
                 xc + hw_load,
-                y_center + eff_hh_use,
+                y_center_loose_query + eff_hh_use,
             )
-            if yv_clip is not None:
-                bbox_loose = _clip_bbox_loose_y(bbox_loose, yv_clip[0], yv_clip[1])
             comb: list[tuple[str, Any, str | None]] = []
             src: dict[str, Any] = {}
+            # 표 영역 지정(selection_world_bboxes)이 있으면: DB 조회 bbox의 세로는 사용자 박스 전체를 쓰고,
+            # 가로는 스트립(X) 밴드와만 교차해 이웃 열 도형 유입을 줄인다. (자동 y_center±eff_hh 창은 보조로만 쓴다)
             if selected_clip_box is not None:
-                ib = _intersect_bbox(bbox_loose, selected_clip_box)
-                if ib is None:
-                    comb = []
-                    src = {"selection_clip": "no_intersection", "selection_clip_only": True}
+                sb = _norm_bbox4(selected_clip_box)
+                sx0 = float(xc) - float(hw_load)
+                sx1 = float(xc) + float(hw_load)
+                ix0 = max(sb[0], sx0)
+                ix1 = min(sb[2], sx1)
+                if ix1 > ix0 + 8.0:
+                    bbox_loose = (ix0, sb[1], ix1, sb[3])
                 else:
-                    bbox_loose = ib
-            if not src:
-                comb, src = _load_combined_shapes_in_bbox(
-                    db,
-                    commit_id,
-                    bbox_loose,
-                    include_block_definitions=include_block_definitions,
-                    block_inserts_cached=block_inserts_cached,
-                )
+                    bbox_loose = sb
+            else:
+                bbox_loose = auto_bbox
+                if yv_clip is not None:
+                    bbox_loose = _clip_bbox_loose_y(bbox_loose, yv_clip[0], yv_clip[1])
+            comb, src = _load_combined_shapes_in_bbox(
+                db,
+                commit_id,
+                bbox_loose,
+                include_block_definitions=include_block_definitions,
+                block_inserts_cached=block_inserts_cached,
+            )
             if selected_clip_box is not None and comb:
                 comb = _filter_shapes_by_bbox(comb, selected_clip_box)
             if selected_clip_box is not None:
@@ -2625,6 +2806,8 @@ def enrich_rows_column_section_geometry(
                     "selection_clip_bbox": [round(selected_clip_box[i], 4) for i in range(4)],
                     "selection_clip_only": True,
                 }
+                if clip_boxes:
+                    src["loose_query_bbox_mode"] = "user_selection_y_strip_x"
             shapes_by_key[cache_key] = comb
             sources_by_key[cache_key] = src
             bbox_by_key[cache_key] = bbox_loose

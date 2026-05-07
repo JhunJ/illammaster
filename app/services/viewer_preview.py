@@ -533,73 +533,77 @@ def build_viewer_preview(
                 labels.append(label_row)
             continue
 
+        from_dim = bool(props.get("from_dimension"))
         for kind, data in _expand_geom(shape):
             if kind == "dot":
                 x, y = data
                 _bounds_update(bounds, x, y)
                 pad = 1e-6
                 bb = [x - pad, y - pad, x + pad, y + pad]
-                vectors.append(
-                    {
-                        "kind": "dot",
-                        "xy": [x, y],
-                        "layer": lay,
-                        "etype": et,
-                        "color": color_css,
-                        "pen": display_pen,
-                        "aci": ent.color,
-                        "cbl": cbl,
-                        "eid": ent.id,
-                        "blk": blk,
-                        "bid": bid,
-                        "bb": bb,
-                        "lw": lw_px,
-                    }
-                )
+                row: dict[str, Any] = {
+                    "kind": "dot",
+                    "xy": [x, y],
+                    "layer": lay,
+                    "etype": et,
+                    "color": color_css,
+                    "pen": display_pen,
+                    "aci": ent.color,
+                    "cbl": cbl,
+                    "eid": ent.id,
+                    "blk": blk,
+                    "bid": bid,
+                    "bb": bb,
+                    "lw": lw_px,
+                }
+                if from_dim:
+                    row["from_dimension"] = True
+                vectors.append(row)
             elif kind == "line":
                 path = data
                 for x, y in path:
                     _bounds_update(bounds, x, y)
                 bb = _bbox_points([(float(a[0]), float(a[1])) for a in path])
-                vectors.append(
-                    {
-                        "kind": "line",
-                        "path": path,
-                        "layer": lay,
-                        "etype": et,
-                        "color": color_css,
-                        "pen": display_pen,
-                        "aci": ent.color,
-                        "cbl": cbl,
-                        "eid": ent.id,
-                        "blk": blk,
-                        "bid": bid,
-                        "bb": bb,
-                        "lw": lw_px,
-                    }
-                )
+                row = {
+                    "kind": "line",
+                    "path": path,
+                    "layer": lay,
+                    "etype": et,
+                    "color": color_css,
+                    "pen": display_pen,
+                    "aci": ent.color,
+                    "cbl": cbl,
+                    "eid": ent.id,
+                    "blk": blk,
+                    "bid": bid,
+                    "bb": bb,
+                    "lw": lw_px,
+                }
+                if from_dim:
+                    row["from_dimension"] = True
+                vectors.append(row)
             elif kind == "fill":
                 path = data
                 for x, y in path:
                     _bounds_update(bounds, x, y)
                 bb = _bbox_points([(float(a[0]), float(a[1])) for a in path])
-                vectors.append(
-                    {
-                        "kind": "fill",
-                        "path": path,
-                        "layer": lay,
-                        "etype": et,
-                        "color": color_css,
-                        "pen": display_pen,
-                        "aci": ent.color,
-                        "cbl": cbl,
-                        "eid": ent.id,
-                        "blk": blk,
-                        "bid": bid,
-                        "bb": bb,
-                        "lw": lw_px,
-                    }
-                )
+                row = {
+                    "kind": "fill",
+                    "path": path,
+                    "layer": lay,
+                    "etype": et,
+                    "color": color_css,
+                    "pen": display_pen,
+                    "aci": ent.color,
+                    "cbl": cbl,
+                    "eid": ent.id,
+                    "blk": blk,
+                    "bid": bid,
+                    "bb": bb,
+                    "lw": lw_px,
+                }
+                if from_dim:
+                    row["from_dimension"] = True
+                vectors.append(row)
 
     if bounds[0] > bounds[2]:
         bounds = [0.0, 0.0, 1.0, 1.0]
