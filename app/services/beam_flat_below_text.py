@@ -10,6 +10,7 @@ from typing import Any
 # 프론트 `below_text_role_values` 와 동일한 한글 키
 ROLE_KEYS_KO = ("크기", "상부근", "하부근", "스트럽", "표피철근")
 
+_RE_COMPACT_WS = re.compile(r"\s+")
 _RE_MARK_DIM_PAREN = re.compile(r"\((\d{2,5})[xX×](\d{2,5})\)")
 
 
@@ -27,7 +28,34 @@ def beam_flat_parse_member_mark_dims(text: str) -> dict[str, int] | None:
         return None
     return {"width_mm": w, "depth_mm": h}
 
-_RE_COMPACT_WS = re.compile(r"\s+")
+
+def beam_flat_member_mark_display_and_dims(text: str) -> tuple[str, dict[str, int] | None]:
+    """
+    표시용 부재 마크(괄호 치수 제거)와 치수 dict.
+    `RG11 (1000x900)`(공백+괄호), `RG11C(1000x900)`(붙임) 모두 처리.
+    """
+    raw = (text or "").strip()
+    if not raw:
+        return "", None
+    try:
+        from app.services.beam_extraction import _split_beam_mark_and_dim_parens
+
+        b, w, h = _split_beam_mark_and_dim_parens(raw)
+        if w is not None and h is not None:
+            base = (b or "").strip()
+            return (base or raw, {"width_mm": int(w), "depth_mm": int(h)})
+    except Exception:
+        pass
+    md = beam_flat_parse_member_mark_dims(raw)
+    if not md:
+        return raw, None
+    s_compact = _RE_COMPACT_WS.sub("", raw)
+    base_c = _RE_MARK_DIM_PAREN.sub("", s_compact, count=1).strip()
+    if not base_c:
+        return raw, md
+    return base_c, md
+
+
 _RE_BXH = re.compile(r"\d{2,5}\s*[x×X]\s*\d{2,5}")
 _RE_REBAR_VAL = re.compile(
     r"\d+\s*[-/]\s*(?:U?HD|SHD|D)\s*\d+|\d+\s*-\s*\d+\s*-\s*(?:U?HD|SHD|D)\s*\d+",

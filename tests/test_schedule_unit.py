@@ -439,3 +439,22 @@ def test_cluster_rows():
 
 def test_slab_layout_guess():
     assert _slab_xy_variant(["600x400", "D13"]) != "unknown"
+
+
+def test_build_beam_flat_member_table_rows_strips_paren_dims_from_mark():
+    """부재별표 행: `RG11 (1000x900)` → 표시 마크 RG11, 치수 dict·width/depth 보강."""
+    from app.services.schedule_extraction import build_beam_flat_member_table_rows
+
+    rows = [
+        {
+            "mark": "RG11 (1000x900)",
+            "name": "",
+            "beam_section_geometry_zones": None,
+        }
+    ]
+    out = build_beam_flat_member_table_rows(rows)
+    assert len(out) == 1
+    assert out[0]["member_mark_text"] == "RG11"
+    assert out[0]["member_mark_dims"] == {"width_mm": 1000, "depth_mm": 900}
+    assert out[0]["width_mm"] == 1000
+    assert out[0]["depth_mm"] == 900

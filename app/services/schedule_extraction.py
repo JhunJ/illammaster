@@ -23,6 +23,7 @@ from app.services.column_section_geometry import (
     enrich_rows_column_section_geometry,
     header_row_is_section_geometry_anchor,
 )
+from app.services.beam_flat_below_text import beam_flat_member_mark_display_and_dims
 
 CATEGORY_WALL = "wall"
 CATEGORY_BEAM = "beam"
@@ -2809,6 +2810,25 @@ def _beam_flat_zone_wh_mm(r: dict[str, Any], z: dict[str, Any]) -> tuple[Any, An
     return w, d
 
 
+def _beam_flat_table_row_member_mark_dim_fields(
+    mark_raw: str,
+    zone_md: Any,
+    w: Any,
+    d: Any,
+) -> tuple[str, Any, Any, Any]:
+    """부재별표 행: 표시 부재명에서 괄호 치수 분리, 치수 dict·width/depth 보강."""
+    md_z = zone_md if isinstance(zone_md, dict) else None
+    disp_mk, md_p = beam_flat_member_mark_display_and_dims(str(mark_raw or "").strip())
+    md_out = md_z or md_p
+    wo, dd = w, d
+    if md_out:
+        if wo is None:
+            wo = md_out.get("width_mm")
+        if dd is None:
+            dd = md_out.get("depth_mm")
+    return disp_mk, md_out, wo, dd
+
+
 def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """flat 단면·존·하단텍스트만으로 부재별 표 1행 후보를 만든다(슬랩/존이 여러 개면 행을 나눔)."""
     out: list[dict[str, Any]] = []
@@ -2823,6 +2843,9 @@ def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[s
                 if slab_idx is None:
                     slab_idx = zi
                 mark = str(z.get("member_mark_text") or r.get("mark") or r.get("name") or "").strip()
+                mark, mdv, w, d = _beam_flat_table_row_member_mark_dim_fields(
+                    mark, z.get("member_mark_dims"), w, d
+                )
                 zone_t = str(z.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip()
                 btr = z.get("below_text_role_values") if isinstance(z.get("below_text_role_values"), dict) else {}
                 out.append(
@@ -2831,7 +2854,7 @@ def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[s
                         "slab_index": int(slab_idx) if isinstance(slab_idx, (int, float)) else slab_idx,
                         "member_mark_text": mark,
                         "member_zone_text": zone_t,
-                        "member_mark_dims": z.get("member_mark_dims"),
+                        "member_mark_dims": mdv,
                         "below_text_role_values": dict(btr),
                         "below_text_chain_values": list(z.get("below_text_chain_values") or [])
                         if isinstance(z.get("below_text_chain_values"), list)
@@ -2847,6 +2870,9 @@ def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[s
             z = zones[0]
             w, d = _beam_flat_zone_wh_mm(r, z)
             mark = str(z.get("member_mark_text") or r.get("mark") or "").strip()
+            mark, mdv, w, d = _beam_flat_table_row_member_mark_dim_fields(
+                mark, z.get("member_mark_dims"), w, d
+            )
             zone_t = str(z.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip()
             btr = z.get("below_text_role_values") if isinstance(z.get("below_text_role_values"), dict) else {}
             out.append(
@@ -2855,7 +2881,7 @@ def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[s
                     "slab_index": z.get("slab_index", 0),
                     "member_mark_text": mark,
                     "member_zone_text": zone_t,
-                    "member_mark_dims": z.get("member_mark_dims"),
+                    "member_mark_dims": mdv,
                     "below_text_role_values": dict(btr),
                     "below_text_chain_values": list(z.get("below_text_chain_values") or [])
                     if isinstance(z.get("below_text_chain_values"), list)
@@ -2868,14 +2894,18 @@ def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[s
             )
             continue
         w, d = r.get("width_mm"), r.get("depth_mm")
+        mark = str(r.get("mark") or r.get("name") or "").strip()
+        mark, mdv, w, d = _beam_flat_table_row_member_mark_dim_fields(
+            mark, r.get("member_mark_dims"), w, d
+        )
         btr = r.get("below_text_role_values") if isinstance(r.get("below_text_role_values"), dict) else {}
         out.append(
             {
                 "source_row_index": ri,
                 "slab_index": 0,
-                "member_mark_text": str(r.get("mark") or r.get("name") or "").strip(),
+                "member_mark_text": mark,
                 "member_zone_text": str(r.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip(),
-                "member_mark_dims": r.get("member_mark_dims"),
+                "member_mark_dims": mdv,
                 "below_text_role_values": dict(btr),
                 "below_text_chain_values": list(r.get("below_text_chain_values") or [])
                 if isinstance(r.get("below_text_chain_values"), list)
@@ -2953,7 +2983,12 @@ def _apply_beam_flat_picked_to_rows(rows: list[dict[str, Any]], picked: list[dic
         mt = str(m.get("text") or "").strip()
         if not mt:
             continue
-        by_mark.setdefault(mt, []).append(p)
+        keys: set[str] = {mt}
+        disp_mk, _ = beam_flat_member_mark_display_and_dims(mt)
+        if disp_mk:
+            keys.add(disp_mk)
+        for k in keys:
+            by_mark.setdefault(k, []).append(p)
 
     def _pick_for_slab(mark_txt: str, x0: float, x1: float) -> dict[str, Any] | None:
         cand = by_mark.get(mark_txt) or []
@@ -3003,13 +3038,18 @@ def _apply_beam_flat_picked_to_rows(rows: list[dict[str, Any]], picked: list[dic
                 continue
             p = _pick_for_slab(mark_txt, x0, x1)
             if not p:
+                disp_mk, _ = beam_flat_member_mark_display_and_dims(mark_txt)
+                if disp_mk and disp_mk != mark_txt:
+                    p = _pick_for_slab(disp_mk, x0, x1)
+            if not p:
                 continue
             m = p.get("member") if isinstance(p, dict) else None
             zo = p.get("zone") if isinstance(p, dict) else None
             if isinstance(m, dict):
                 mt = str(m.get("text") or "").strip()
                 if mt:
-                    z["member_mark_text"] = mt
+                    disp, _ = beam_flat_member_mark_display_and_dims(mt)
+                    z["member_mark_text"] = disp if disp else mt
                 try:
                     z["member_mark_anchor"] = {
                         "x": round(float(m.get("x")), 4),

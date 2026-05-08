@@ -31,6 +31,7 @@ from app.services.beam_extraction import (
     _merge_beam_vertical_records_across_strips,
     _record_from_beam_vertical_dynamic,
     _split_beam_mark_and_dim_parens,
+    _normalize_beam_mark_paren_dimensions,
     _split_beam_vertical_dyn_by_zone_spans,
     _beam_row_cluster_centroid_xy_mode_x,
     _beam_row_cluster_parse_horizontal_zone_slots,
@@ -594,6 +595,14 @@ def test_split_beam_mark_paren_size():
     assert w == 1000 and h == 900
     b2, w2, h2 = _split_beam_mark_and_dim_parens("RG13C")
     assert b2 == "RG13C" and w2 is None and h2 is None
+
+
+def test_normalize_beam_mark_paren_dimensions_record():
+    rec = {"mark": "RG11 (1000x900)", "name": "RG11 (1000x900)", "member_label": "RG11 (1000x900)"}
+    _normalize_beam_mark_paren_dimensions(rec)
+    assert rec["mark"] == "RG11" and rec["name"] == "RG11" and rec["member_label"] == "RG11"
+    assert rec["width_mm"] == 1000 and rec["depth_mm"] == 900
+    assert rec["SIZE"] == "1000x900"
 
 
 def test_beam_vertical_enrich_korean_zones_and_paren_mark():

@@ -107,6 +107,7 @@ def _apply_beam_bar_notation_to_record(rec: dict[str, Any]) -> None:
 
 def _finalize_beam_extraction_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     for r in rows:
+        _normalize_beam_mark_paren_dimensions(r)
         _apply_beam_bar_notation_to_record(r)
     return rows
 
@@ -859,6 +860,40 @@ def _split_beam_mark_and_dim_parens(s: str) -> tuple[str, int | None, int | None
     if not (200 <= w <= 4000 and 200 <= h <= 4000):
         return raw, None, None
     return body or raw, w, h
+
+
+def _normalize_beam_mark_paren_dimensions(rec: dict[str, Any]) -> None:
+    """
+    부호/부재명에 `RG11 (1000x900)` 형태가 붙은 경우 본문·치수를 분리한다.
+    member_label·mark·name 중 처음으로 괄호 치수가 파싱되는 문자열을 기준으로 한다.
+    """
+    candidates: list[str] = []
+    for k in ("member_label", "mark", "name"):
+        v = rec.get(k)
+        if isinstance(v, str) and v.strip():
+            candidates.append(v.strip())
+    if not candidates:
+        return
+    base: str | None = None
+    wmm: int | None = None
+    hmm: int | None = None
+    for s in candidates:
+        b, w, h = _split_beam_mark_and_dim_parens(s)
+        if w is not None and h is not None:
+            base = (b or "").strip()
+            wmm, hmm = w, h
+            break
+    if not base or wmm is None or hmm is None:
+        return
+    rec["mark"] = base
+    rec["name"] = base
+    rec["member_label"] = base
+    if not isinstance(rec.get("width_mm"), int):
+        rec["width_mm"] = wmm
+    if not isinstance(rec.get("depth_mm"), int):
+        rec["depth_mm"] = hmm
+    rec["size_mm"] = [wmm, hmm]
+    rec["SIZE"] = f"{wmm}x{hmm}"
 
 
 def _norm_text_for_standalone_mm_label(text: str) -> str:
@@ -3951,6 +3986,7 @@ def _beam_row_cluster_segment_to_record(
     if cfg.building_tag:
         rec["building"] = cfg.building_tag
     _enrich_beam_vertical_record(rec)
+    _normalize_beam_mark_paren_dimensions(rec)
     ys_all: list[float] = []
     for row in block_rows:
         for it in row:
@@ -3970,6 +4006,7 @@ def _beam_row_bundle_match_line_for_segment(
     rec: dict[str, Any],
     strip_index: int,
 ) -> dict[str, Any] | None:
+    _normalize_beam_mark_paren_dimensions(rec)
     mk = str(rec.get("mark") or "").strip()
     if not mk or not block_rows:
         return None
@@ -4446,6 +4483,7 @@ def extract_beam_row_cluster_bundle(
                         rec["member_label"] = mk
 
                     _enrich_beam_vertical_record(rec)
+                    _normalize_beam_mark_paren_dimensions(rec)
                     if yb_use is not None:
                         rec["row_data_anchor_y_bounds"] = [
                             round(float(yb_use[0]), 4),
@@ -4612,6 +4650,7 @@ def extract_beam_flat_fallback(
             merged["mark"] = mf
             merged["name"] = mf
             merged["member_label"] = mf
+            _normalize_beam_mark_paren_dimensions(merged)
         rows_out.append(merged)
     return rows_out
 

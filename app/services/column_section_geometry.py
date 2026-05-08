@@ -35,6 +35,7 @@ except ImportError:
 from app.models import BlockDef, BlockInsert, Entity
 from app.services.beam_flat_below_text import (
     beam_flat_fill_below_text_role_values_from_entities,
+    beam_flat_member_mark_display_and_dims,
     beam_flat_parse_member_mark_dims,
 )
 from app.services.beam_flat_spatial import (
@@ -2257,6 +2258,13 @@ def _beam_flat_enrich_zone_metadata(
             if md:
                 mark_dims = md
             break
+
+    if mark_txt:
+        disp_mk, md_disp = beam_flat_member_mark_display_and_dims(mark_txt)
+        if disp_mk:
+            mark_txt = disp_mk
+        if md_disp and mark_dims is None:
+            mark_dims = md_disp
 
     if not zone_txt:
         # 세로블록 템플릿/헤더에서 만들어진 "END CEN END ..." 같은 덩어리 문자열은
