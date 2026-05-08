@@ -1246,6 +1246,19 @@
               </div>
             </div>
             <div id="extractMemberTableHost" class="extract-member-table-host"></div>
+            <div id="extractBeamMemberTableDebugWrap" class="extract-error-list-card" style="display:none;margin-top:10px">
+              <details class="extract-debug-subdetails">
+                <summary class="extract-subsection-title" style="cursor:pointer;user-select:none;margin:0">
+                  부재별표 디버그 (텍스트) — 펼치기
+                </summary>
+                <div class="extract-debug-copybar" style="margin:6px 0 8px">
+                  <button type="button" class="secondary extract-debug-copy-btn" id="btnBeamMemberTableDebugCopy">
+                    부재별표 디버그 텍스트 복사
+                  </button>
+                </div>
+                <pre id="extractBeamMemberTableDebugPre" class="out" style="max-height:min(32vh, 260px)"></pre>
+              </details>
+            </div>
           </div>
           <div id="extractDebugPanelWrap" class="extract-debug-panel-wrap extract-result-outside-body" style="display:none">
             <details id="extractDebugDetails" class="extract-debug-details">
@@ -1267,8 +1280,8 @@
             <label class="row-check" style="margin: 0; align-items: flex-start; gap: 8px">
               <input type="checkbox" id="chkBeamCirclePatternDebug" style="margin-top: 3px" checked />
               <span style="line-height: 1.35">
-                <strong>원·선 패턴 단면 디버그</strong> — CIRCLE·직교선 기반 단면 후보(브라우저 오버레이). 서버는 flat 단일 경로로 단면을 읽습니다.
-                <span style="opacity: 0.85">「단면 오버레이」와 함께 켜 두면 서버 박스·브라우저 패턴을 동시에 비교할 수 있습니다.</span>
+                <strong>원·선 패턴 단면 디버그</strong> — 브라우저 오버레이(CIRCLE·직교선 후보). 서버 단면(flat)과 겹쳐 확인할 때 사용합니다.
+                <span style="opacity: 0.85">「단면 오버레이」와 함께 켜 두면 서버 박스와 동시에 볼 수 있습니다.</span>
               </span>
             </label>
           </div>
@@ -2553,10 +2566,20 @@
     }
     if (run && run.rows && run.rows.length && v.column_vertical_blocks) {
       const rows = run.rows;
+      let nFailCol = 0;
+      rows.forEach(function (r) {
+        const sg = r.section_geometry || {};
+        if (sg.ok === false) nFailCol++;
+      });
       const strips = v.column_vertical_strips || [];
       dbg +=
-        '<p class="extract-debug-sub">SECTION 단면 기하 — 부재 매칭 (검색·클러스터·주근·외곽). ' +
-        '앵커: <code>row_data_strip_y</code>=우측 값 열 Y(층별), <code>template_section_label_y</code>=좌측 SECTION 라벨 Y. 캔버스 오버레이 ON 시 청록 점선 = 주근 클러스터 <code>cluster_bbox</code>.</p>' +
+        '<details class="extract-debug-subdetails" style="margin-top:8px"><summary>SECTION 단면 기하 상세 · ' +
+        rows.length +
+        '행 · 실패 ' +
+        nFailCol +
+        '</summary>';
+      dbg +=
+        '<p class="extract-debug-sub">검색·클러스터·주근·외곽. 앵커: <code>row_data_strip_y</code>, <code>template_section_label_y</code>. 전체 텍스트는 「디버그 텍스트 복사」.</p>' +
         '<div style="overflow-x:auto"><table class="extract-grid extract-debug-mini"><thead><tr>' +
         '<th>#</th><th>부호</th><th>스트립</th><th>OK</th><th>앵커출처</th><th>Y조회</th><th>도형수</th><th>원후보</th>' +
         '<th>비고·클러스터</th><th>검색(분석)</th><th>느슨</th><th>철근클러스터</th><th title="느슨창 원 / 분석 도형 원">원(느슨/분석)</th><th title="cluster_size">클러N</th><th title="merged_circle_count">병합N</th><th>주근</th><th>외곽B×H</th>' +
@@ -2697,7 +2720,7 @@
           owh +
           '</td></tr>';
       });
-      dbg += '</tbody></table></div>';
+      dbg += '</tbody></table></div></details>';
     }
     dbg += flat ? '</div>' : '</details></div>';
     return dbg;
@@ -4370,49 +4393,121 @@
     if (btn) btn.disabled = !plain;
   }
 
+  /** 보 추출 행들의 단면 존별 OK/실패 개수(우측 디버그 요약용) */
+  function beamSectionGeometryZoneStats(rows) {
+    let nZones = 0;
+    let nOk = 0;
+    let nFail = 0;
+    if (!Array.isArray(rows)) return { nZones: 0, nOk: 0, nFail: 0 };
+    rows.forEach(function (r) {
+      const zones = r.beam_section_geometry_zones;
+      if (Array.isArray(zones) && zones.length) {
+        zones.forEach(function (z) {
+          nZones++;
+          const ok = z.section_geometry && z.section_geometry.ok;
+          if (ok === true) nOk++;
+          else if (ok === false) nFail++;
+        });
+      } else if (r.section_geometry) {
+        nZones++;
+        const ok = r.section_geometry.ok;
+        if (ok === true) nOk++;
+        else if (ok === false) nFail++;
+      }
+    });
+    return { nZones: nZones, nOk: nOk, nFail: nFail };
+  }
+
   function renderBeamVerticalDebugPanel(v, run, opts) {
     const o = opts || {};
     const flat = !!o.noOuterDetails;
     if (!v) return '';
     window.__lastBeamVerticalDebugPlain = formatBeamVerticalDebugPlain(v, run);
+    const vertBlocks = v.beam_vertical_blocks === true;
+    const rowsDbg = (run && run.rows) || [];
+    const geoStats = beamSectionGeometryZoneStats(rowsDbg);
+
     let dbg = flat
       ? '<div class="extract-vertical-debug extract-vertical-debug--flat">'
-      : '<div class="extract-vertical-debug"><details open><summary>추출 디버그 (보·세로 블록)</summary>';
+      : '<div class="extract-vertical-debug"><details open><summary>추출 디버그 (보)</summary>';
     if (!flat) {
       dbg +=
         '<div class="extract-debug-copybar"><button type="button" class="secondary extract-debug-copy-btn">디버그 텍스트 복사</button></div>';
     }
+
     dbg += '<dl class="extract-debug-dl">';
-    dbg += '<dt>좌·우 분리</dt><dd>' + escapeHtml(String(v.beam_vertical_split_mode || '-')) + '</dd>';
-    if (v.beam_vertical_split_boundary != null && v.beam_vertical_split_boundary !== '') {
-      dbg +=
-        '<dt>X 경계(추출)</dt><dd>' +
-        escapeHtml(String(v.beam_vertical_split_boundary)) +
-        '</dd>';
-      if (v.beam_vertical_split_boundary_draw != null && v.beam_vertical_split_boundary_draw !== '') {
+    if (vertBlocks) {
+      dbg += '<dt>좌·우 분리</dt><dd>' + escapeHtml(String(v.beam_vertical_split_mode || '-')) + '</dd>';
+      if (v.beam_vertical_split_boundary != null && v.beam_vertical_split_boundary !== '') {
         dbg +=
-          '<dt>X 경계(주황선 표시)</dt><dd>' +
-          escapeHtml(String(v.beam_vertical_split_boundary_draw)) +
-          ' — 격선에 맞게 소폭 우측</dd>';
+          '<dt>X 경계(추출)</dt><dd>' +
+          escapeHtml(String(v.beam_vertical_split_boundary)) +
+          '</dd>';
+        if (v.beam_vertical_split_boundary_draw != null && v.beam_vertical_split_boundary_draw !== '') {
+          dbg +=
+            '<dt>X 경계(주황선 표시)</dt><dd>' +
+            escapeHtml(String(v.beam_vertical_split_boundary_draw)) +
+            ' — 격선에 맞게 소폭 우측</dd>';
+        }
+      }
+      if (v.beam_vertical_member_zone_match_lines && v.beam_vertical_member_zone_match_lines.length) {
+        dbg +=
+          '<dt>부재-부위 매칭선</dt><dd>뷰어 청록 점선 · 스트립 ' +
+          v.beam_vertical_member_zone_match_lines.length +
+          '개 (부재명→부위→단면 <code>points</code> 폴리라인). 단면 오버레이 ON일 때 표시.</dd>';
+      }
+      dbg +=
+        '<dt>좌/우 문자</dt><dd>' +
+        (v.beam_label_entity_count != null ? v.beam_label_entity_count : '-') +
+        ' / ' +
+        (v.beam_data_entity_count != null ? v.beam_data_entity_count : '-') +
+        '</dd>';
+      dbg +=
+        '<dt>단면 존</dt><dd>총 ' +
+        geoStats.nZones +
+        ' · OK ' +
+        geoStats.nOk +
+        ' · 실패 ' +
+        geoStats.nFail +
+        '</dd>';
+    } else {
+      dbg +=
+        '<dt>표 레이아웃</dt><dd><code>' +
+        escapeHtml(String(v.beam_layout_resolved || '-').trim()) +
+        '</code></dd>';
+      const bsb = String(v.beam_section_geo_branch || '').trim();
+      if (bsb) {
+        dbg += '<dt>단면 경로</dt><dd><code>' + escapeHtml(bsb) + '</code></dd>';
+      }
+      dbg +=
+        '<dt>단면 존</dt><dd>총 ' +
+        geoStats.nZones +
+        ' · OK ' +
+        geoStats.nOk +
+        ' · 실패 ' +
+        geoStats.nFail +
+        '</dd>';
+      dbg +=
+        '<dt>플래그</dt><dd>row_cluster_bundle=' +
+        String(v.beam_row_cluster_bundle === true) +
+        ' · wide_or_tree=' +
+        String(v.beam_wide_or_tree === true) +
+        '</dd>';
+      if (v.beam_vertical_member_zone_match_lines && v.beam_vertical_member_zone_match_lines.length) {
+        dbg +=
+          '<dt>부재-부위 매칭선</dt><dd>뷰어 청록 점선 · ' +
+          v.beam_vertical_member_zone_match_lines.length +
+          '개 (단면 오버레이 ON)</dd>';
       }
     }
-    if (v.beam_vertical_member_zone_match_lines && v.beam_vertical_member_zone_match_lines.length) {
-      dbg +=
-        '<dt>부재-부위 매칭선</dt><dd>뷰어 청록 점선 · 스트립 ' +
-        v.beam_vertical_member_zone_match_lines.length +
-        '개 (부재명→부위→단면 <code>points</code> 폴리라인). 단면 오버레이 ON일 때 표시.</dd>';
-    }
-    dbg +=
-      '<dt>좌/우 문자</dt><dd>' +
-      (v.beam_label_entity_count != null ? v.beam_label_entity_count : '-') +
-      ' / ' +
-      (v.beam_data_entity_count != null ? v.beam_data_entity_count : '-') +
-      '</dd>';
     dbg += '</dl>';
+
     const fh = v.beam_vertical_field_headers;
-    if (fh && fh.length) {
+    if (vertBlocks && fh && fh.length) {
       dbg +=
-        '<p class="extract-debug-sub">좌측 Y 템플릿 행. INT·END·ALL 등은 <b>열(부위) 구간</b>용 라벨이며, 부호·형태와 같은 &quot;전역 행 제목&quot;이 아닙니다.</p>';
+        '<details class="extract-debug-subdetails" style="margin-top:8px"><summary>Y 템플릿 행 (' +
+        fh.length +
+        '개)</summary><p class="extract-debug-sub">INT·END·ALL 등은 <b>열(부위) 구간</b>용 라벨입니다.</p>';
       dbg += '<table class="extract-grid extract-debug-mini"><thead><tr><th>#</th><th>라벨</th><th>키</th><th>Y</th></tr></thead><tbody>';
       fh.forEach((h, i) => {
         dbg +=
@@ -4426,14 +4521,19 @@
           escapeHtml(String(h.y != null ? h.y : '')) +
           '</td></tr>';
       });
-      dbg += '</tbody></table>';
+      dbg += '</tbody></table></details>';
     }
-    const rowsDbg = (run && run.rows) || [];
+
     if (rowsDbg.length && beamValidationPolyNav(v)) {
       const strips = v.beam_vertical_strips || [];
       dbg +=
-        '<p class="extract-debug-sub"><strong>단면 기하 (행×존)</strong> — 서버 <code>search_bbox</code>·<code>cluster_geometry.cluster_bbox</code>(주근 클러스터)·OK·reason. 비어 있으면 뷰어가 스트립 폴백 네모를 그립니다. 캔버스 오버레이 ON 시 청록 점선이 클러스터 박스입니다. 아래 표는 &quot;디버그 텍스트 복사&quot;에도 같이 포함됩니다.</p>' +
-        '<p class="extract-debug-sub" style="margin-top:4px"><strong>원(느슨/분석)</strong>: 느슨 조회창에서 CIRCLE·폴리라인 원 후보 수 / <code>analyze_section_geometry</code>에 넣은 도형에서 센 원 개수. 숫자가 다르면 클러스터 필터로 분석 쪽만 줄어든 것입니다.</p>';
+        '<details class="extract-debug-subdetails" style="margin-top:8px"><summary>단면 기하 상세 표 · 존 ' +
+        geoStats.nZones +
+        ' · 실패 ' +
+        geoStats.nFail +
+        '</summary>';
+      dbg +=
+        '<p class="extract-debug-sub">서버 <code>search_bbox</code>·클러스터·OK·reason·picked. 원(느슨/분석) 숫자 차이는 필터링 때문일 수 있습니다. 전체 텍스트는 「디버그 텍스트 복사」.</p>';
       dbg +=
         '<div class="extract-result-table-wrap" style="max-height:280px;overflow:auto"><table class="extract-grid extract-debug-mini"><thead><tr>' +
         '<th>행</th><th>부호</th><th>존</th><th>SI</th><th>xc</th><th>부위</th><th>OK</th><th>reason</th>' +
@@ -4604,56 +4704,10 @@
             '</td></tr>';
         }
       });
-      dbg += '</tbody></table></div>';
+      dbg += '</tbody></table></div></details>';
     }
     dbg += flat ? '</div>' : '</details></div>';
     return dbg;
-  }
-
-  function renderBeamVerticalPivotTableOnly(run, opts) {
-    const o = opts || {};
-    const navOn = !!o.navigate;
-    const v = run.validation || {};
-    const rows = Array.isArray(run.rows) ? run.rows : [];
-    const r0 = rows[0] || {};
-    const keyOrder = Array.isArray(r0.beam_field_key_order)
-      ? r0.beam_field_key_order
-      : Object.keys(r0.beam_field_titles || {});
-    const titles = r0.beam_field_titles || {};
-    const dup = new Set(v.duplicate_row_indices || []);
-    let out =
-      '<p class="extract-pivot-hint" style="margin:0 0 8px">도면 왼쪽에 부호·구간(INT/CENTER/ALL 등)·형태·철근 행이 <strong>세로로 반복</strong>되면 아래 첫 열도 그만큼 늘어납니다. ' +
-      '가로 열은 우측 스트립(부재 열)입니다. INT+CENTER 등 <strong>한 부재에 스트립이 여러 개</strong>이면 부재별 표의 스트립 X에 중심값이 여러 개 표시됩니다.</p>';
-    out += '<div class="extract-result-table-wrap"><table class="extract-grid extract-pivot-grid"><thead><tr>';
-    out += '<th scope="col">행 제목 (좌측)</th>';
-    rows.forEach((r, ci) => {
-      let hname = '보 ' + (ci + 1);
-      const mk = beamCanvasMemberNameForMemberTable(run, ci).trim();
-      if (mk) hname = mk;
-      const dupMark = dup.has(ci) ? ' <span class="extract-dup-flag" title="중복 검사 의심">!</span>' : '';
-      const navPart = navOn ? ' class="extract-nav-target" data-extract-nav-row="' + ci + '"' : '';
-      out +=
-        '<th scope="col"' +
-        navPart +
-        ' title="클릭하면 해당 부재 위치로 이동">' +
-        escapeHtml(hname) +
-        dupMark +
-        '</th>';
-    });
-    out += '</tr></thead><tbody>';
-    keyOrder.forEach((key, fi) => {
-      const rowTitle = titles[key] != null ? String(titles[key]) : String(key);
-      out += '<tr><th scope="row">' + escapeHtml(rowTitle) + '</th>';
-      rows.forEach((r, ci) => {
-        const cells = Array.isArray(r.cells) ? r.cells : [];
-        const val = cells[fi] != null && cells[fi] !== '' ? cells[fi] : '';
-        const navPart = navOn ? ' class="extract-nav-target" data-extract-nav-row="' + ci + '"' : '';
-        out += '<td' + navPart + '>' + escapeHtml(formatExtractCell(val)) + '</td>';
-      });
-      out += '</tr>';
-    });
-    out += '</tbody></table></div>';
-    return out;
   }
 
   /** 보: 부재별 정리 표 (Name·내비는 부호-부위-단면 매칭선 우선). */
@@ -4731,6 +4785,10 @@
     const strips = v.beam_vertical_strips || [];
     const labMap = buildPreviewLabelEidMap();
     const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
+    const dbgLines = [];
+    dbgLines.push('=== 부재별표(보·가로 Y묶음) 디버그 ===');
+    dbgLines.push('serverFlatRows: ' + serverFlatRows.length);
+    dbgLines.push('beam_flat_picked: ' + (Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked.length : 0));
 
     function beamFlatAnalysisForRow(rowIndex) {
       const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
@@ -4832,10 +4890,39 @@
       if (flatPl && Number.isFinite(Number(flatPl.height_world)) && !depthCell) {
         depthCell = String(Math.round(Number(flatPl.height_world)));
       }
-      const topBarCell = flatTx.top || z(r.int_top_bar);
-      const botBarCell = flatTx.bot || z(r.int_bot_bar);
-      const stirCell = flatTx.stir || z(r.int_stirrup_bar);
-      const sideCell = flatTx.skin || z(r.side_bar);
+      // 서버 flat 행(슬랩 단위)은 부위(INT/CEN/EXT/END/ALL)에 맞는 칼럼에만 값을 채운다.
+      // 그렇지 않으면 동일 source_row_index를 공유하는 여러 행에서 원본 r.* 값이 반복되어 "중복"으로 보인다.
+      const zoneKeyRaw = String(opts.zoneKey || '').trim().toUpperCase();
+      const zKey =
+        zoneKeyRaw === 'INT'
+          ? 'INT'
+          : zoneKeyRaw === 'CEN' || zoneKeyRaw === 'CENTER'
+            ? 'CEN'
+            : zoneKeyRaw === 'EXT' || zoneKeyRaw === 'END'
+              ? 'EXT'
+              : zoneKeyRaw === 'ALL'
+                ? 'ALL'
+                : '';
+      const isSrv = !!opts.isServerFlatRow;
+      const tTop = flatTx.top || (isSrv ? '' : z(r.int_top_bar));
+      const tBot = flatTx.bot || (isSrv ? '' : z(r.int_bot_bar));
+      const tStir = flatTx.stir || (isSrv ? '' : z(r.int_stirrup_bar));
+      const tSkin = flatTx.skin || (isSrv ? '' : z(r.side_bar));
+
+      const topInt = !isSrv ? z(r.int_top_bar) : zKey === 'INT' || zKey === 'ALL' ? tTop : '';
+      const topCen = !isSrv ? zb('cen_top_bar', r.cen_top_bar) : zKey === 'CEN' || zKey === 'ALL' ? tTop : '';
+      const topExt = !isSrv ? zb('ext_top_bar', r.ext_top_bar) : zKey === 'EXT' || zKey === 'ALL' ? tTop : '';
+
+      const botInt = !isSrv ? z(r.int_bot_bar) : zKey === 'INT' || zKey === 'ALL' ? tBot : '';
+      const botCen = !isSrv ? zb('cen_bot_bar', r.cen_bot_bar) : zKey === 'CEN' || zKey === 'ALL' ? tBot : '';
+      const botExt = !isSrv ? zb('ext_bot_bar', r.ext_bot_bar) : zKey === 'EXT' || zKey === 'ALL' ? tBot : '';
+
+      const stInt = !isSrv ? z(r.int_stirrup_bar) : zKey === 'INT' || zKey === 'ALL' ? tStir : '';
+      const stCen = !isSrv ? zb('cen_stirrup_bar', r.cen_stirrup_bar) : zKey === 'CEN' || zKey === 'ALL' ? tStir : '';
+      const stExt = !isSrv ? zb('ext_stirrup_bar', r.ext_stirrup_bar) : zKey === 'EXT' || zKey === 'ALL' ? tStir : '';
+
+      // 표의 'Side Bar'는 부위별로 따로 칼럼이 없어서, 해당 부위 행에만 표시(ALL이면 모든 행 동일)
+      const sideCell = isSrv ? (zKey ? tSkin : '') : (tSkin || z(r.side_bar));
       const nameCell = opts.nameCell;
       const rowNum = opts.rowNum;
       let h = '';
@@ -4846,15 +4933,15 @@
       h += '<td>' + escapeHtml(z(r.material)) + '</td>';
       h += '<td>' + escapeHtml(widthCell) + '</td>';
       h += '<td>' + escapeHtml(depthCell) + '</td>';
-      h += '<td>' + escapeHtml(topBarCell) + '</td>';
-      h += '<td>' + zb('cen_top_bar', r.cen_top_bar) + '</td>';
-      h += '<td>' + zb('ext_top_bar', r.ext_top_bar) + '</td>';
-      h += '<td>' + escapeHtml(botBarCell) + '</td>';
-      h += '<td>' + zb('cen_bot_bar', r.cen_bot_bar) + '</td>';
-      h += '<td>' + zb('ext_bot_bar', r.ext_bot_bar) + '</td>';
-      h += '<td>' + escapeHtml(stirCell) + '</td>';
-      h += '<td>' + zb('cen_stirrup_bar', r.cen_stirrup_bar) + '</td>';
-      h += '<td>' + zb('ext_stirrup_bar', r.ext_stirrup_bar) + '</td>';
+      h += '<td>' + escapeHtml(topInt) + '</td>';
+      h += '<td>' + escapeHtml(topCen) + '</td>';
+      h += '<td>' + escapeHtml(topExt) + '</td>';
+      h += '<td>' + escapeHtml(botInt) + '</td>';
+      h += '<td>' + escapeHtml(botCen) + '</td>';
+      h += '<td>' + escapeHtml(botExt) + '</td>';
+      h += '<td>' + escapeHtml(stInt) + '</td>';
+      h += '<td>' + escapeHtml(stCen) + '</td>';
+      h += '<td>' + escapeHtml(stExt) + '</td>';
       h += '<td>' + escapeHtml(sideCell) + '</td>';
       h += '<td>' + escapeHtml(sx) + '</td>';
       h += '</tr>';
@@ -4862,28 +4949,542 @@
     }
 
     if (serverFlatRows.length) {
+      // 서버 flat 슬랩행(부위별)을 "부재명 1행"으로 병합한다.
+      const picked = Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked : [];
+      const secByMark = {};
+      const zoneByMark = {};
+      const pickedCentersByMarkZone = {}; // mark -> zoneKey -> [[x,y],...]
+      const pickedEndFlagByMark = {}; // mark -> true if any picked zone text contains END
+      picked.forEach(function (p) {
+        const m = p && p.member;
+        const s = p && p.section;
+        const z = p && p.zone;
+        if (!m || !s) return;
+        const mt = String(m.text || '').trim();
+        const x = Number(s.x);
+        const y = Number(s.y);
+        if (!mt || ![x, y].every(Number.isFinite)) return;
+        (secByMark[mt] = secByMark[mt] || []).push([x, y]);
+        if (z && String(z.text || '').trim()) {
+          (zoneByMark[mt] = zoneByMark[mt] || []).push(String(z.text || '').trim());
+        }
+        const zt = String((z && z.text) || '').trim();
+        const zu = zt.toUpperCase();
+        if (zu.indexOf('END') >= 0) pickedEndFlagByMark[mt] = true;
+        let zk = '';
+        if (zu === 'INT') zk = 'INT';
+        else if (zu === 'CEN' || zu === 'CENTER') zk = 'CEN';
+        else if (zu === 'EXT' || zu === 'END') zk = 'EXT';
+        else if (zu === 'ALL') zk = 'ALL';
+        if (zk) {
+          pickedCentersByMarkZone[mt] = pickedCentersByMarkZone[mt] || {};
+          (pickedCentersByMarkZone[mt][zk] = pickedCentersByMarkZone[mt][zk] || []).push([x, y]);
+        }
+      });
+
+      // 화면(프론트)에서 이미 읽어낸 below_text_role_values를 단면 중심점으로 역참조해 표에 채운다(서버가 비었을 때 보강).
+      const planeAnalyses = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
+      function plCentroidXY(pl) {
+        if (!pl) return null;
+        let cx = pl.centroid && Number(pl.centroid.x);
+        let cy = pl.centroid && Number(pl.centroid.y);
+        if (![cx, cy].every(Number.isFinite)) {
+          const bb = pl.norm_bbox || pl.section_bbox;
+          if (bb && bb.length === 4 && bb.every((q) => Number.isFinite(Number(q)))) {
+            cx = (Number(bb[0]) + Number(bb[2])) * 0.5;
+            cy = (Number(bb[1]) + Number(bb[3])) * 0.5;
+          }
+        }
+        if (![cx, cy].every(Number.isFinite)) return null;
+        return [cx, cy];
+      }
+      function nearestPlaneAnalysisTo(x, y) {
+        let best = null;
+        let bestS = Infinity;
+        for (let i = 0; i < planeAnalyses.length; i++) {
+          const pl = planeAnalyses[i];
+          const c = plCentroidXY(pl);
+          if (!c) continue;
+          const dx = Math.abs(c[0] - x);
+          const dy = Math.abs(c[1] - y);
+          const s = dy + dx * 0.25;
+          if (s < bestS) {
+            bestS = s;
+            best = pl;
+          }
+        }
+        return best;
+      }
+      function textFromPlane(pl) {
+        const rv = (pl && pl.below_text_role_values) || {};
+        const chain = Array.isArray(pl && pl.below_text_chain_values) ? pl.below_text_chain_values : [];
+        let skinStr = String(rv['표피철근'] || '').trim();
+        if (!skinStr && chain.length >= 4) {
+          const c3 = String(chain[3] || '').trim();
+          if (c3 && !beamFlatLooksLikeMemberMarkText(c3) && beamFlatLooksLikeRebarValueText(c3)) skinStr = c3;
+        }
+        return {
+          top: String(rv['상부근'] || chain[0] || '').trim(),
+          bot: String(rv['하부근'] || chain[1] || '').trim(),
+          stir: String(rv['스트럽'] || chain[2] || '').trim(),
+          skin: skinStr,
+        };
+      }
+
+      function normZoneKey(z) {
+        const u = String(z || '').trim().toUpperCase();
+        if (u === 'INT') return 'INT';
+        if (u === 'CEN' || u === 'CENTER') return 'CEN';
+        if (u === 'EXT' || u === 'END') return 'EXT';
+        if (u === 'ALL') return 'ALL';
+        return '';
+      }
+      function shouldMirrorEndToIntExt(zoneSet) {
+        // 규칙: END(EXT로 정규화)만 있고 INT가 없으면 END는 INT/EXT 둘 다를 의미
+        // (즉 INT가 비어있으면 EXT 값을 INT에도 복제) — CEN 유무와 무관
+        if (!zoneSet || !(zoneSet instanceof Set)) return false;
+        const hasE = zoneSet.has('EXT');
+        const hasI = zoneSet.has('INT');
+        const hasA = zoneSet.has('ALL');
+        return hasE && !hasI && !hasA;
+      }
+      function mergeCell(oldV, newV) {
+        const a = String(oldV || '').trim();
+        const b = String(newV || '').trim();
+        if (!a) return b;
+        if (!b) return a;
+        if (a === b) return a;
+        // 다중값은 중복 제거 후 ' / '로 합침
+        const parts = Array.from(new Set((a + ' / ' + b).split('/').map((s) => s.trim()).filter(Boolean)));
+        return parts.join(' / ');
+      }
+
+      const aggOrder = [];
+      const agg = {}; // mark -> {ri, widthMm, depthMm, topInt,..., sxSet, side, type, material}
       serverFlatRows.forEach(function (fr, ii) {
-        const srcRi = Number(fr.source_row_index);
+        const srcRi = Number(fr && fr.source_row_index);
         const ri = Number.isFinite(srcRi) ? srcRi : ii;
         const r = rows[ri] || {};
+        const mark = String((fr && fr.member_mark_text) || '').trim() || beamCanvasMemberNameForMemberTable(run, ri, labMap).trim();
+        if (!mark) return;
+        const zKey = normZoneKey(fr && fr.member_zone_text);
         const srvPl = {
-          below_text_role_values: fr.below_text_role_values,
-          below_text_chain_values: fr.below_text_chain_values,
+          below_text_role_values: fr && fr.below_text_role_values,
+          below_text_chain_values: fr && fr.below_text_chain_values,
         };
-        const flatTxSrv = beamFlatTextValuesForRow(srvPl);
-        const nm = String(fr.member_mark_text || '').trim();
-        const zn = String(fr.member_zone_text || '').trim();
-        let nameCell = [nm, zn].filter(Boolean).join(' · ');
-        if (!nameCell) nameCell = beamCanvasMemberNameForMemberTable(run, ri, labMap);
-        html += oneRowHtml({
-          ri: ri,
-          rowNum: ii + 1,
-          nameCell: nameCell,
-          widthMm: fr.width_mm,
-          depthMm: fr.depth_mm,
-          flatTxSrv: flatTxSrv,
-          sx: fr.strip_x,
+        let tx = beamFlatTextValuesForRow(srvPl);
+        const txFromServer = !!(tx.top || tx.bot || tx.stir || tx.skin);
+        // 서버값이 비면, 화면에서 이미 읽힌 단면 텍스트(pl.below_text_role_values)로 보강
+        if (!(tx.top || tx.bot || tx.stir || tx.skin)) {
+          const secList = secByMark[mark] || [];
+          if (secList.length) {
+            // mark에 대해 가장 가까운 단면(pl) 하나를 고르고 그 텍스트를 사용(부위별로 값이 다르면 / 로 병합됨)
+            const s0 = secList[0];
+            const pl = nearestPlaneAnalysisTo(Number(s0[0]), Number(s0[1]));
+            const tx2 = textFromPlane(pl);
+            if (tx2.top || tx2.bot || tx2.stir || tx2.skin) tx = tx2;
+          }
+        }
+        const txFromFrontend = !txFromServer && !!(tx.top || tx.bot || tx.stir || tx.skin);
+        const sx = fr && fr.strip_x != null && fr.strip_x !== '' ? String(fr.strip_x) : '';
+
+        if (!agg[mark]) {
+          agg[mark] = {
+            ri: ri,
+            widthMm: fr && fr.width_mm,
+            depthMm: fr && fr.depth_mm,
+            type: r.type,
+            material: r.material,
+            topInt: '',
+            topCen: '',
+            topExt: '',
+            botInt: '',
+            botCen: '',
+            botExt: '',
+            stInt: '',
+            stCen: '',
+            stExt: '',
+            side: '',
+            sxSet: new Set(),
+            navXSum: 0,
+            navYSum: 0,
+            navN: 0,
+            // 디버그 집계
+            zSeen: new Set(),
+            zBlank: new Set(),
+            srcServer: 0,
+            srcFrontend: 0,
+            srcNone: 0,
+            pickedZSeen: new Set(),
+            // 입력 추적(왜 한 mark가 여러 값으로 합쳐지는지)
+            inServer: [],
+            inPicked: [],
+            inSrcRows: new Set(),
+            dropped: [],
+          };
+          aggOrder.push(mark);
+          const pts = secByMark[mark] || [];
+          pts.forEach(function (pt) {
+            const x = Number(pt[0]);
+            const y = Number(pt[1]);
+            if (![x, y].every(Number.isFinite)) return;
+            agg[mark].navXSum += x;
+            agg[mark].navYSum += y;
+            agg[mark].navN += 1;
+          });
+        }
+        const a = agg[mark];
+        a.inSrcRows.add(String(ri));
+        // server row의 "단면 중심 X" (가능하면 section_geometry bbox 중심) — picked의 section.x와 같은 좌표계라 매칭에 안정적
+        let repX = Number(fr && fr.strip_x);
+        try {
+          const sg = fr && fr.section_geometry;
+          const bb =
+            sg &&
+            (sg.search_bbox ||
+              sg.search_bbox_loose ||
+              (sg.cluster_geometry && sg.cluster_geometry.cluster_bbox) ||
+              null);
+          if (bb && bb.length >= 4 && bb.every((q) => Number.isFinite(Number(q)))) {
+            repX = (Number(bb[0]) + Number(bb[2])) * 0.5;
+          }
+        } catch (e) {}
+        a.inServer.push({
+          i: ii,
+          source_row_index: ri,
+          slab_index: fr && fr.slab_index,
+          zone_raw: fr && fr.member_zone_text,
+          zone_key: zKey,
+          strip_x: fr && fr.strip_x,
+          rep_x: repX,
+          width_mm: fr && fr.width_mm,
+          depth_mm: fr && fr.depth_mm,
+          tx_src: txFromServer ? 'server' : txFromFrontend ? 'frontend' : 'none',
+          tx_top: tx.top,
+          tx_bot: tx.bot,
+          tx_stir: tx.stir,
+          tx_skin: tx.skin,
         });
+        if (zKey) a.zSeen.add(zKey);
+        else a.zBlank.add('(zone blank)');
+        if (txFromServer) a.srcServer += 1;
+        else if (txFromFrontend) a.srcFrontend += 1;
+        else a.srcNone += 1;
+        if (sx) a.sxSet.add(sx);
+        // 폭/춤은 첫 유효값 우선
+        if (!a.widthMm && fr && fr.width_mm) a.widthMm = fr.width_mm;
+        if (!a.depthMm && fr && fr.depth_mm) a.depthMm = fr.depth_mm;
+
+        // NOTE: 실제 칼럼 채우기는 picked 중심에 가장 가까운 server row를 고른 뒤(2차 패스) 수행
+      });
+
+      // picked 기반으로 "부위 집합" 보강 + 누락된 부위 텍스트를 단면(pl)에서 채움
+      function applyTxToAgg(a, zone, tx) {
+        if (!a || !zone || !tx) return;
+        function mergeTo(z) {
+          if (z === 'INT') {
+            a.topInt = mergeCell(a.topInt, tx.top);
+            a.botInt = mergeCell(a.botInt, tx.bot);
+            a.stInt = mergeCell(a.stInt, tx.stir);
+          } else if (z === 'CEN') {
+            a.topCen = mergeCell(a.topCen, tx.top);
+            a.botCen = mergeCell(a.botCen, tx.bot);
+            a.stCen = mergeCell(a.stCen, tx.stir);
+          } else if (z === 'EXT') {
+            a.topExt = mergeCell(a.topExt, tx.top);
+            a.botExt = mergeCell(a.botExt, tx.bot);
+            a.stExt = mergeCell(a.stExt, tx.stir);
+          }
+        }
+        if (zone === 'ALL') {
+          mergeTo('INT');
+          mergeTo('CEN');
+          mergeTo('EXT');
+        } else {
+          mergeTo(zone);
+        }
+        // Side Bar는 부재별표/엑셀에서 채우지 않음(요청사항)
+      }
+
+      aggOrder.forEach(function (mark) {
+        const a = agg[mark];
+        if (!a) return;
+        const mz = pickedCentersByMarkZone[mark] || {};
+        // picked 입력(연결된 단면 중심/부위) 추적
+        try {
+          const pz = mz || {};
+          Object.keys(pz).forEach(function (zk) {
+            const pts = pz[zk] || [];
+            pts.forEach(function (pt) {
+              const x = Number(pt[0]);
+              const y = Number(pt[1]);
+              if (![x, y].every(Number.isFinite)) return;
+              a.inPicked.push({ zone_key: zk, x: x, y: y });
+            });
+          });
+        } catch (e) {}
+        Object.keys(mz).forEach(function (zk) {
+          a.pickedZSeen.add(zk);
+        });
+        // server가 놓친 zone도 화면(picked) 기준으로 zSeen에 포함
+        a.pickedZSeen.forEach(function (zk) {
+          if (!a.zSeen.has(zk)) a.zSeen.add(zk);
+        });
+
+        // 1) server flat rows(슬랩행) 중, picked 중심에 가장 가까운 것만 zone별로 채택해 칼럼을 채운다.
+        //    (화면에서 1개만 잡히는데 표에서 값이 섞이는 문제 방지)
+        a.topInt = '';
+        a.topCen = '';
+        a.topExt = '';
+        a.botInt = '';
+        a.botCen = '';
+        a.botExt = '';
+        a.stInt = '';
+        a.stCen = '';
+        a.stExt = '';
+        a.side = '';
+        a._srcByZone = { INT: '', CEN: '', EXT: '', ALL: '' };
+
+        function targetXForZone(zone) {
+          const pts = (mz && mz[zone]) || [];
+          if (pts.length && Number.isFinite(Number(pts[0][0]))) return Number(pts[0][0]);
+          const all = secByMark[mark] || [];
+          if (all.length && Number.isFinite(Number(all[0][0]))) return Number(all[0][0]);
+          return NaN;
+        }
+        function bestServerForZone(zone) {
+          const tx = targetXForZone(zone);
+          const cand = (a.inServer || []).filter((it) => String(it.zone_key || '') === zone || (zone === 'EXT' && String(it.zone_key || '') === 'EXT') || (zone === 'CEN' && String(it.zone_key || '') === 'CEN') || (zone === 'INT' && String(it.zone_key || '') === 'INT'));
+          if (!cand.length) return null;
+          let best = null;
+          let bestDx = Infinity;
+          for (let i = 0; i < cand.length; i++) {
+            const sx = Number(cand[i].rep_x != null ? cand[i].rep_x : cand[i].strip_x);
+            if (!Number.isFinite(sx) || !Number.isFinite(tx)) continue;
+            const dx = Math.abs(sx - tx);
+            if (dx < bestDx) {
+              bestDx = dx;
+              best = cand[i];
+            }
+          }
+          // targetX가 없으면 첫 후보
+          return best || cand[0];
+        }
+        function applyPickedPlane(zone) {
+          const pts = (mz && mz[zone]) || [];
+          if (!pts.length) return false;
+          const pl = nearestPlaneAnalysisTo(Number(pts[0][0]), Number(pts[0][1]));
+          const tx = textFromPlane(pl);
+          if (!tx || !(tx.top || tx.bot || tx.stir || tx.skin)) return false;
+          applyTxToAgg(a, zone, tx);
+          a._srcByZone[zone] = 'plane';
+          return true;
+        }
+        function applySrvRow(zone) {
+          const it = bestServerForZone(zone);
+          if (!it) return false;
+          const tx = {
+            top: String(it.tx_top || '').trim(),
+            bot: String(it.tx_bot || '').trim(),
+            stir: String(it.tx_stir || '').trim(),
+            skin: String(it.tx_skin || '').trim(),
+          };
+          if (!(tx.top || tx.bot || tx.stir || tx.skin)) return false;
+          applyTxToAgg(a, zone, tx);
+          a._srcByZone[zone] = 'serverRow';
+          return true;
+        }
+        // ALL은 server row 자체가 있을 수 있음(그 경우 3칸 모두 채움)
+        const itAll = (a.inServer || []).find((it) => String(it.zone_key || '') === 'ALL');
+        if (itAll) {
+          // 화면(plane) 우선, 없으면 server ALL 사용
+          if (!applyPickedPlane('ALL')) {
+            applyTxToAgg(
+              a,
+              'ALL',
+              {
+                top: String(itAll.tx_top || '').trim(),
+                bot: String(itAll.tx_bot || '').trim(),
+                stir: String(itAll.tx_stir || '').trim(),
+                skin: String(itAll.tx_skin || '').trim(),
+              },
+            );
+            a._srcByZone.ALL = 'serverRow';
+          }
+        } else {
+          // 화면(pl) 우선, 없으면 server row fallback
+          if (!applyPickedPlane('INT')) applySrvRow('INT');
+          if (!applyPickedPlane('CEN')) applySrvRow('CEN');
+          if (!applyPickedPlane('EXT')) applySrvRow('EXT');
+        }
+
+        // 2) 누락된 zone 값은 picked section 중심 근처 planeAnalysis 텍스트로 채움
+        function maybeFill(zone) {
+          if (zone === 'INT' && (a.topInt || a.botInt || a.stInt)) return;
+          if (zone === 'CEN' && (a.topCen || a.botCen || a.stCen)) return;
+          if (zone === 'EXT' && (a.topExt || a.botExt || a.stExt)) return;
+          const pts = (mz && mz[zone]) || [];
+          if (!pts.length) return;
+          let bestTx = null;
+          for (let i = 0; i < pts.length; i++) {
+            const pl = nearestPlaneAnalysisTo(Number(pts[i][0]), Number(pts[i][1]));
+            const tx = textFromPlane(pl);
+            if (tx && (tx.top || tx.bot || tx.stir || tx.skin)) {
+              bestTx = tx;
+              break;
+            }
+          }
+          if (bestTx) applyTxToAgg(a, zone, bestTx);
+        }
+        maybeFill('INT');
+        maybeFill('CEN');
+        maybeFill('EXT');
+
+        // 규칙: CEN+END(EXT)만 있을 때 END는 INT/EXT 모두
+        if (pickedEndFlagByMark[mark] && shouldMirrorEndToIntExt(a.zSeen)) {
+          if (!a.topInt && !a.botInt && !a.stInt) {
+            a.topInt = mergeCell(a.topInt, a.topExt);
+            a.botInt = mergeCell(a.botInt, a.botExt);
+            a.stInt = mergeCell(a.stInt, a.stExt);
+            if (!a._srcByZone.INT) a._srcByZone.INT = 'mirroredEND';
+          }
+        }
+      });
+
+      aggOrder.forEach(function (mark, oi) {
+        const a = agg[mark];
+        if (!a) return;
+        const ri = a.ri;
+        // oneRowHtml은 isServerFlatRow=true일 때 zoneKey 기준으로 한 칼럼만 채우는 구조라
+        // 병합 행은 "서버행이지만 이미 칼럼이 완성된 상태"로 직접 그린다.
+        const r = rows[ri] || {};
+        const cls = [dup.has(ri) ? 'extract-dup-row' : '', 'extract-nav-target'].filter(Boolean).join(' ');
+        const z = (x) => (x != null && x !== '' ? String(x) : '');
+        const sx = Array.from(a.sxSet.values()).filter(Boolean).join(', ');
+        const navWx = a.navN > 0 ? a.navXSum / a.navN : NaN;
+        const navWy = a.navN > 0 ? a.navYSum / a.navN : NaN;
+        const navAttr =
+          [navWx, navWy].every(Number.isFinite)
+            ? ' data-extract-nav-wx="' + String(navWx) + '" data-extract-nav-wy="' + String(navWy) + '"'
+            : '';
+        html += '<tr class="' + cls + '" data-extract-nav-row="' + ri + '"' + navAttr + ' title="클릭하면 매칭된 단면으로 이동">';
+        html += '<td class="num">' + (oi + 1) + '</td>';
+        html += '<td>' + escapeHtml(mark) + '</td>';
+        html += '<td>' + escapeHtml(z(r.type)) + '</td>';
+        html += '<td>' + escapeHtml(z(r.material)) + '</td>';
+        html += '<td>' + escapeHtml(z(a.widthMm)) + '</td>';
+        html += '<td>' + escapeHtml(z(a.depthMm)) + '</td>';
+        html += '<td>' + escapeHtml(a.topInt) + '</td>';
+        html += '<td>' + escapeHtml(a.topCen) + '</td>';
+        html += '<td>' + escapeHtml(a.topExt) + '</td>';
+        html += '<td>' + escapeHtml(a.botInt) + '</td>';
+        html += '<td>' + escapeHtml(a.botCen) + '</td>';
+        html += '<td>' + escapeHtml(a.botExt) + '</td>';
+        html += '<td>' + escapeHtml(a.stInt) + '</td>';
+        html += '<td>' + escapeHtml(a.stCen) + '</td>';
+        html += '<td>' + escapeHtml(a.stExt) + '</td>';
+        html += '<td></td>';
+        html += '<td>' + escapeHtml(sx) + '</td>';
+        html += '</tr>';
+
+        // 디버그: 비어있는 칼럼 원인 요약(부위 미존재 vs 텍스트 미검출)
+        const seen = Array.from(a.zSeen.values()).join(',') || '-';
+        const pickedSeen = Array.from(a.pickedZSeen.values()).join(',') || '-';
+        const blankZ = Array.from(a.zBlank.values()).join(',') || '-';
+        const miss = [];
+        if (!a.topInt && !a.botInt && !a.stInt) miss.push('INT');
+        if (!a.topCen && !a.botCen && !a.stCen) miss.push('CEN');
+        if (!a.topExt && !a.botExt && !a.stExt) miss.push('EXT');
+        dbgLines.push(
+          [
+            String(oi + 1),
+            mark,
+            'zones_seen(server+picked)=' + seen,
+            'zones_picked=' + pickedSeen,
+            'zone_blank=' + blankZ,
+            'text_src(server/frontend/none)=' + a.srcServer + '/' + a.srcFrontend + '/' + a.srcNone,
+            'empty_cols=' + (miss.length ? miss.join(',') : '-'),
+          ].join('\t'),
+        );
+        if (a._srcByZone) {
+          dbgLines.push(
+            '  - filled_by: INT=' +
+              String(a._srcByZone.INT || '-') +
+              ', CEN=' +
+              String(a._srcByZone.CEN || '-') +
+              ', EXT=' +
+              String(a._srcByZone.EXT || '-') +
+              ', ALL=' +
+              String(a._srcByZone.ALL || '-'),
+          );
+        }
+
+        // 입력 상세(왜 1개로 보이는데 표에서는 여러 값으로 합쳐졌는지)
+        // 너무 길어지지 않게 상위 N개만 표시
+        const srvN = a.inServer.length;
+        const pickN = a.inPicked.length;
+        const srcRowN = a.inSrcRows.size;
+        if (srvN > 1 || pickN > 1 || srcRowN > 1) {
+          dbgLines.push('  - inputs: server_rows=' + srvN + ', picked_centers=' + pickN + ', source_row_indices=' + srcRowN);
+          if (srcRowN > 1) {
+            dbgLines.push('    - source_row_indices: ' + Array.from(a.inSrcRows.values()).join(', '));
+          }
+          if (a.dropped && a.dropped.length) {
+            const showD = a.dropped.slice(0, 6);
+            dbgLines.push('    - dropped_server_rows: ' + a.dropped.length);
+            showD.forEach(function (it) {
+              dbgLines.push(
+                '    - drop[' +
+                  it.i +
+                  '] ri=' +
+                  it.source_row_index +
+                  ' slab=' +
+                  it.slab_index +
+                  ' zone=' +
+                  String(it.zone_raw || '-') +
+                  ' sx=' +
+                  String(it.strip_x || '-') +
+                  ' dist=' +
+                  (Number.isFinite(Number(it.dist_to_picked)) ? Number(it.dist_to_picked).toFixed(1) : '-'),
+              );
+            });
+            if (a.dropped.length > showD.length) dbgLines.push('    - ... dropped more: ' + (a.dropped.length - showD.length));
+          }
+          const showSrv = a.inServer.slice(0, 6);
+          showSrv.forEach(function (it) {
+            dbgLines.push(
+              '    - srv[' +
+                it.i +
+                '] ri=' +
+                it.source_row_index +
+                ' slab=' +
+                it.slab_index +
+                ' zone=' +
+                String(it.zone_raw || '-') +
+                ' (' +
+                String(it.zone_key || '-') +
+                ')' +
+                ' sx=' +
+                String(it.strip_x || '-') +
+                ' repX=' +
+                (Number.isFinite(Number(it.rep_x)) ? Number(it.rep_x).toFixed(2) : '-') +
+                ' txsrc=' +
+                it.tx_src +
+                ' top=' +
+                String(it.tx_top || '-') +
+                ' bot=' +
+                String(it.tx_bot || '-') +
+                ' stir=' +
+                String(it.tx_stir || '-') ,
+            );
+          });
+          if (srvN > showSrv.length) dbgLines.push('    - ... srv more: ' + (srvN - showSrv.length));
+          const showPk = a.inPicked.slice(0, 6);
+          showPk.forEach(function (p) {
+            dbgLines.push('    - picked zone=' + p.zone_key + ' sec=(' + p.x.toFixed(2) + ',' + p.y.toFixed(2) + ')');
+          });
+          if (pickN > showPk.length) dbgLines.push('    - ... picked more: ' + (pickN - showPk.length));
+        }
       });
     } else {
       rows.forEach((r, ri) => {
@@ -4902,6 +5503,20 @@
       });
     }
     html += '</tbody></table></div>';
+    // 디버그 패널 채우기(부재별표 아래)
+    try {
+      window.__lastBeamMemberTableDebugPlain = dbgLines.join('\n');
+      const pre = $('extractBeamMemberTableDebugPre');
+      const wrap = $('extractBeamMemberTableDebugWrap');
+      const btn = $('btnBeamMemberTableDebugCopy');
+      if (wrap && pre) {
+        pre.textContent = window.__lastBeamMemberTableDebugPlain || '';
+        wrap.style.display = pre.textContent ? 'block' : 'none';
+      }
+      if (btn) {
+        btn.style.display = window.__lastBeamMemberTableDebugPlain ? '' : 'none';
+      }
+    } catch (e) {}
     return html;
   }
 
@@ -5118,6 +5733,7 @@
   function buildBeamVerticalTidyAoa(rows, validation) {
     const v = validation || {};
     const strips = v.beam_vertical_strips || [];
+    const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
     const h = [
       '#',
       'Name',
@@ -5139,6 +5755,260 @@
     ];
     const aoa = [h];
     const fauxRun = { rows: rows, validation: v };
+    function beamFlatTextFromServerRow(fr) {
+      const rv = (fr && fr.below_text_role_values) || {};
+      const chain = Array.isArray(fr && fr.below_text_chain_values) ? fr.below_text_chain_values : [];
+      let skinStr = String(rv['표피철근'] || '').trim();
+      if (!skinStr && chain.length >= 4) {
+        const c3 = String(chain[3] || '').trim();
+        if (c3 && typeof beamFlatLooksLikeMemberMarkText === 'function' && typeof beamFlatLooksLikeRebarValueText === 'function') {
+          if (!beamFlatLooksLikeMemberMarkText(c3) && beamFlatLooksLikeRebarValueText(c3)) skinStr = c3;
+        } else {
+          if (c3) skinStr = c3;
+        }
+      }
+      return {
+        top: String(rv['상부근'] || chain[0] || '').trim(),
+        bot: String(rv['하부근'] || chain[1] || '').trim(),
+        stir: String(rv['스트럽'] || chain[2] || '').trim(),
+        skin: skinStr,
+      };
+    }
+
+    if (serverFlatRows.length) {
+      function normZoneKey(z) {
+        const u = String(z || '').trim().toUpperCase();
+        if (u === 'INT') return 'INT';
+        if (u === 'CEN' || u === 'CENTER') return 'CEN';
+        if (u === 'EXT' || u === 'END') return 'EXT';
+        if (u === 'ALL') return 'ALL';
+        return '';
+      }
+      function shouldMirrorEndToIntExt(a) {
+        // 엑셀도 동일 규칙: END(EXT)만 있고 INT가 없으면 END는 INT/EXT 모두 의미
+        if (!a || !a.zSeen) return false;
+        const s = a.zSeen;
+        return s.has('EXT') && !s.has('INT') && !s.has('ALL');
+      }
+      function mergeCell(oldV, newV) {
+        const a = String(oldV || '').trim();
+        const b = String(newV || '').trim();
+        if (!a) return b;
+        if (!b) return a;
+        if (a === b) return a;
+        const parts = Array.from(new Set((a + ' / ' + b).split('/').map((s) => s.trim()).filter(Boolean)));
+        return parts.join(' / ');
+      }
+      const order = [];
+      const agg = {}; // mark -> aggregated
+      serverFlatRows.forEach(function (fr, ii) {
+        const srcRi = Number(fr && fr.source_row_index);
+        const ri = Number.isFinite(srcRi) ? srcRi : ii;
+        const r = (rows && rows[ri]) || {};
+        const z = (x) => (x != null && x !== '' ? x : '');
+        const mark = String((fr && fr.member_mark_text) || '').trim() || beamCanvasMemberNameForMemberTable(fauxRun, ri).trim();
+        if (!mark) return;
+        const zKey = normZoneKey(fr && fr.member_zone_text);
+        const tx = beamFlatTextFromServerRow(fr);
+        const sx =
+          fr && fr.strip_x != null && fr.strip_x !== '' ? String(fr.strip_x) : formatBeamMergedStripXs(r, strips);
+        if (!agg[mark]) {
+          agg[mark] = {
+            ri: ri,
+            type: z(r.type),
+            material: z(r.material),
+            widthMm: z(fr && fr.width_mm),
+            depthMm: z(fr && fr.depth_mm),
+            topInt: '',
+            topCen: '',
+            topExt: '',
+            botInt: '',
+            botCen: '',
+            botExt: '',
+            stInt: '',
+            stCen: '',
+            stExt: '',
+            side: '',
+            sxSet: new Set(),
+            zSeen: new Set(),
+          };
+          order.push(mark);
+        }
+        const a = agg[mark];
+        if (zKey) a.zSeen.add(zKey);
+        if (sx) a.sxSet.add(sx);
+        if (!a.widthMm && fr && fr.width_mm) a.widthMm = z(fr.width_mm);
+        if (!a.depthMm && fr && fr.depth_mm) a.depthMm = z(fr.depth_mm);
+
+        function applyTo(zone) {
+          if (zone === 'INT') {
+            a.topInt = mergeCell(a.topInt, tx.top);
+            a.botInt = mergeCell(a.botInt, tx.bot);
+            a.stInt = mergeCell(a.stInt, tx.stir);
+          } else if (zone === 'CEN') {
+            a.topCen = mergeCell(a.topCen, tx.top);
+            a.botCen = mergeCell(a.botCen, tx.bot);
+            a.stCen = mergeCell(a.stCen, tx.stir);
+          } else if (zone === 'EXT') {
+            a.topExt = mergeCell(a.topExt, tx.top);
+            a.botExt = mergeCell(a.botExt, tx.bot);
+            a.stExt = mergeCell(a.stExt, tx.stir);
+          }
+        }
+        if (zKey === 'ALL') {
+          applyTo('INT');
+          applyTo('CEN');
+          applyTo('EXT');
+        } else if (zKey) {
+          if (zKey === 'EXT' && shouldMirrorEndToIntExt(a)) {
+            applyTo('EXT');
+            applyTo('INT');
+          } else {
+            applyTo(zKey);
+          }
+        }
+        // Side Bar는 부재별표/엑셀에서 채우지 않음(요청사항)
+      });
+
+      // 엑셀도 picked 기반으로 누락된 부위(특히 EXT/END)를 보강해 채운다.
+      const picked = Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked : [];
+      const centersByMarkZone = {};
+      picked.forEach(function (p) {
+        const m = p && p.member;
+        const s = p && p.section;
+        const z = p && p.zone;
+        if (!m || !s || !z) return;
+        const mt = String(m.text || '').trim();
+        const zx = String(z.text || '').trim().toUpperCase();
+        let zk = '';
+        if (zx === 'INT') zk = 'INT';
+        else if (zx === 'CEN' || zx === 'CENTER') zk = 'CEN';
+        else if (zx === 'EXT' || zx === 'END') zk = 'EXT';
+        else if (zx === 'ALL') zk = 'ALL';
+        const x = Number(s.x);
+        const y = Number(s.y);
+        if (!mt || !zk || ![x, y].every(Number.isFinite)) return;
+        centersByMarkZone[mt] = centersByMarkZone[mt] || {};
+        (centersByMarkZone[mt][zk] = centersByMarkZone[mt][zk] || []).push([x, y]);
+      });
+
+      const planeAnalyses = Array.isArray(lastRunByCategory.beam && lastRunByCategory.beam.beam_flat_merged_section_analysis)
+        ? lastRunByCategory.beam.beam_flat_merged_section_analysis
+        : [];
+      function plCentroidXY(pl) {
+        if (!pl) return null;
+        let cx = pl.centroid && Number(pl.centroid.x);
+        let cy = pl.centroid && Number(pl.centroid.y);
+        if (![cx, cy].every(Number.isFinite)) {
+          const bb = pl.norm_bbox || pl.section_bbox;
+          if (bb && bb.length === 4 && bb.every((q) => Number.isFinite(Number(q)))) {
+            cx = (Number(bb[0]) + Number(bb[2])) * 0.5;
+            cy = (Number(bb[1]) + Number(bb[3])) * 0.5;
+          }
+        }
+        if (![cx, cy].every(Number.isFinite)) return null;
+        return [cx, cy];
+      }
+      function nearestPlaneTx(x, y) {
+        let best = null;
+        let bestS = Infinity;
+        for (let i = 0; i < planeAnalyses.length; i++) {
+          const pl = planeAnalyses[i];
+          const c = plCentroidXY(pl);
+          if (!c) continue;
+          const dx = Math.abs(c[0] - x);
+          const dy = Math.abs(c[1] - y);
+          const s = dy + dx * 0.25;
+          if (s < bestS) {
+            bestS = s;
+            best = pl;
+          }
+        }
+        if (!best) return null;
+        const rv = (best && best.below_text_role_values) || {};
+        const chain = Array.isArray(best && best.below_text_chain_values) ? best.below_text_chain_values : [];
+        let skinStr = String(rv['표피철근'] || '').trim();
+        if (!skinStr && chain.length >= 4) {
+          const c3 = String(chain[3] || '').trim();
+          if (c3) skinStr = c3;
+        }
+        return {
+          top: String(rv['상부근'] || chain[0] || '').trim(),
+          bot: String(rv['하부근'] || chain[1] || '').trim(),
+          stir: String(rv['스트럽'] || chain[2] || '').trim(),
+          skin: skinStr,
+        };
+      }
+
+      order.forEach(function (mark) {
+        const a = agg[mark];
+        if (!a) return;
+        const mz = centersByMarkZone[mark] || {};
+        function fillIfEmpty(zone) {
+          if (zone === 'INT' && (a.topInt || a.botInt || a.stInt)) return;
+          if (zone === 'CEN' && (a.topCen || a.botCen || a.stCen)) return;
+          if (zone === 'EXT' && (a.topExt || a.botExt || a.stExt)) return;
+          const pts = (mz && mz[zone]) || [];
+          if (!pts.length) return;
+          const tx = nearestPlaneTx(Number(pts[0][0]), Number(pts[0][1]));
+          if (!tx) return;
+          function mergeTo(z) {
+            if (z === 'INT') {
+              a.topInt = mergeCell(a.topInt, tx.top);
+              a.botInt = mergeCell(a.botInt, tx.bot);
+              a.stInt = mergeCell(a.stInt, tx.stir);
+            } else if (z === 'CEN') {
+              a.topCen = mergeCell(a.topCen, tx.top);
+              a.botCen = mergeCell(a.botCen, tx.bot);
+              a.stCen = mergeCell(a.stCen, tx.stir);
+            } else if (z === 'EXT') {
+              a.topExt = mergeCell(a.topExt, tx.top);
+              a.botExt = mergeCell(a.botExt, tx.bot);
+              a.stExt = mergeCell(a.stExt, tx.stir);
+            }
+          }
+          mergeTo(zone);
+          a.side = mergeCell(a.side, tx.skin);
+        }
+        fillIfEmpty('INT');
+        fillIfEmpty('CEN');
+        fillIfEmpty('EXT');
+        if (shouldMirrorEndToIntExt(a)) {
+          if (!a.topInt && !a.botInt && !a.stInt) {
+            a.topInt = mergeCell(a.topInt, a.topExt);
+            a.botInt = mergeCell(a.botInt, a.botExt);
+            a.stInt = mergeCell(a.stInt, a.stExt);
+          }
+        }
+      });
+
+      order.forEach(function (mark, oi) {
+        const a = agg[mark];
+        if (!a) return;
+        const sx = Array.from(a.sxSet.values()).filter(Boolean).join(', ');
+        aoa.push([
+          oi + 1,
+          mark,
+          a.type,
+          a.material,
+          a.widthMm,
+          a.depthMm,
+          a.topInt,
+          a.topCen,
+          a.topExt,
+          a.botInt,
+          a.botCen,
+          a.botExt,
+          a.stInt,
+          a.stCen,
+          a.stExt,
+          '',
+          sx,
+        ]);
+      });
+      return aoa;
+    }
+
     rows.forEach((r, ri) => {
       const sx = formatBeamMergedStripXs(r, strips);
       const z = (x) => (x != null && x !== '' ? x : '');
@@ -5766,19 +6636,13 @@
       return;
     }
     const cat = String(run.category || activeExtractTabKey() || '').toLowerCase();
+    if (cat === 'beam') {
+      el.style.display = 'none';
+      el.innerHTML = '';
+      return;
+    }
     const v = run.validation || {};
     const esc = escapeHtml;
-
-    function beamConceptsDetails() {
-      return (
-        '<details class="extract-read-path-concepts">' +
-        '<summary>보 추출 방식이 여러 가지인 이유 (쉽게)</summary>' +
-        '<p>도면마다 일람표가 다릅니다. 어떤 도면은 <strong>한 줄에 넓게</strong> 펼쳐져 있고(와이드), 어떤 도면은 <strong>세로로 두 덩어리</strong>(왼쪽 제목·오른쪽 칸)로 나 있으며, 또 어떤 도면은 <strong>표 제목이 거의 없어서</strong> 같은 높이의 글자만으로 줄을 묶어야 합니다.</p>' +
-        '<p>프로그램은 위에서부터 순서대로 「와이드/트리 표 → 행 묶음 번들 → flat 폴백」처럼 <strong>맞아 보이는 형식 하나를 고릅니다</strong>. 그때 서버가 기록하는 이름이 <code>beam_layout_resolved</code> 입니다.</p>' +
-        '<p><strong>Flat</strong>은 표 형식을 확실히 못 잡았을 때의 단순 모드에 가깝고, 캔버스에서 <strong>원(CIRCLE)을 모아 상·하로 색만 나누는 디버그 오버레이</strong>는 주로 이 모드에서 돌아갑니다. 반대로 <strong>행 묶음 번들·와이드</strong>일 때는 서버가 단면 박스·스트립을 중심으로 그립니다.</p>' +
-        '</details>'
-      );
-    }
 
     let title = '이번 실행 · 읽기 방식';
     let headline = '';
@@ -5786,72 +6650,7 @@
     let codeLine = '';
     let concepts = '';
 
-    if (cat === 'beam') {
-      concepts = beamConceptsDetails();
-      const resolvedRaw = v.beam_layout_resolved != null ? String(v.beam_layout_resolved).trim() : '';
-      const resolved = resolvedRaw.toLowerCase();
-      const vert = v.beam_vertical_blocks === true;
-      const bundle = v.beam_row_cluster_bundle === true;
-      const wideTree = v.beam_wide_or_tree === true;
-
-      codeLine =
-        'beam_layout_resolved=' +
-        esc(resolvedRaw || '-') +
-        ' · beam_vertical_blocks=' +
-        String(vert) +
-        ' · beam_row_cluster_bundle=' +
-        String(bundle) +
-        ' · beam_wide_or_tree=' +
-        String(wideTree);
-
-      if (vert) {
-        headline = '세로 블록 일람(좌 제목 · 우 데이터)';
-        body =
-          '<p class="extract-read-path-lead"><strong>판정:</strong> 왼쪽에 행 제목(부호·상부근·하부근 등), 오른쪽에 열별 데이터가 있는 <strong>세로형 표</strong>로 보았습니다.</p>' +
-          '<ul>' +
-          '<li>열(스트립)마다 단면·철근 분석이 붙습니다.</li>' +
-          '<li>캔버스 오버레이는 스트립 위치·부재→부위→단면 매칭선·서버 단면 박스 중심입니다.</li>' +
-          '</ul>';
-      } else if (wideTree) {
-        if (resolved === 'horizontal_wide') {
-          headline = '가로 와이드 표';
-          body =
-            '<p class="extract-read-path-lead"><strong>판정:</strong> 한 줄에 칸이 넓게 이어진 <strong>와이드형 보 일람</strong>으로 인식했습니다.</p>' +
-            '<ul><li>열 헤더·셀 구조를 기준으로 필드를 읽습니다.</li></ul>';
-        } else if (resolved === 'horizontal_location_tree') {
-          headline = 'Location 트리 형 표';
-          body =
-            '<p class="extract-read-path-lead"><strong>판정:</strong> Location 등 <strong>트리형 헤더</strong> 구조로 보았습니다.</p>' +
-            '<ul><li>와이드와 비슷하게 가로 표 로직을 탑니다.</li></ul>';
-        } else {
-          headline = '가로 표 (와이드·트리류)';
-          body =
-            '<p class="extract-read-path-lead"><strong>판정:</strong> 가로 방향 일람 표(와이드 또는 트리)로 읽었습니다.</p>' +
-            '<ul><li>상세 코드는 아래 <code>beam_layout_resolved</code>를 보세요.</li></ul>';
-        }
-      } else if (bundle || resolved === 'row_cluster_bundle') {
-        headline = '행 묶음 번들';
-        body =
-          '<p class="extract-read-path-lead"><strong>판정:</strong> 표 헤더가 약하거나 특이해서, <strong>같은 줄(Y)</strong>로 묶인 텍스트와 「부호가 나오는 줄」부터 이어지는 블록으로 부재를 나눴습니다.</p>' +
-          '<ul>' +
-          '<li>세로 블록처럼 좌·우 전체를 나누지 않고, 행 띠(R0,R1…)·부재 블록 단위로 단면을 찾습니다.</li>' +
-          '<li>캔버스의 원 상·하 색 분리(flat 전용 클라이언트 분석)는 보통 이 경로에서는 기대하지 않습니다.</li>' +
-          '</ul>';
-      } else if (resolved === 'flat' || beamLayoutResolvedFlat(v)) {
-        headline = 'Flat 가로 일람 (폴백)';
-        body =
-          '<p class="extract-read-path-lead"><strong>판정:</strong> 와이드·행 번들 등으로 표 형식을 확정하지 못했거나, 설정상 flat만 해당할 때의 <strong>단순 가로 모드</strong>입니다.</p>' +
-          '<ul>' +
-          '<li>줄 단위로만 묶인 행에서 값을 읽습니다.</li>' +
-          '<li>도면에 CIRCLE이 있으면 캔버스에서 원을 모아 클러스터하고, 단면 무게중심 기준 <strong>상부(주황)·하부(보라)</strong>로 나누는 오버레이가 여기서 주로 맞습니다.</li>' +
-          '</ul>';
-      } else {
-        headline = resolvedRaw ? '보 · ' + resolvedRaw : '보 추출';
-        body =
-          '<p class="extract-read-path-lead"><strong>판정:</strong> 서버가 선택한 형식 코드는 아래와 같습니다. 요약 한 줄에도 같은 정보가 반복됩니다.</p>' +
-          '<ul><li>표 형식이 바뀌면 이 값도 바뀝니다.</li></ul>';
-      }
-    } else if (cat === 'column') {
+    if (cat === 'column') {
       title = '이번 실행 · 기둥 읽기 방식';
       if (v.column_vertical_blocks) {
         headline = '세로 블록 기둥표';
@@ -6027,12 +6826,6 @@
           '<h4 class="extract-subsection-title">엑셀 추출 전 (행×열 피벗)</h4>' +
           '<p class="hint" style="margin:4px 0 8px;font-size:0.72rem">좌 라벨 × 부재 열. 열·셀 클릭 시 해당 부재로 이동합니다.</p>' +
           renderColumnVerticalPivotTableOnly(run, { navigate: true });
-      } else if (v && beamValidationPolyNav(v) && rows && rows.length) {
-        ph.style.display = 'block';
-        ph.innerHTML =
-          '<h4 class="extract-subsection-title">엑셀 추출 전 (보·좌 라벨 × 부재)</h4>' +
-          '<p class="hint" style="margin:4px 0 8px;font-size:0.72rem">열·셀 클릭 시 해당 보 위치로 이동합니다.</p>' +
-          renderBeamVerticalPivotTableOnly(run, { navigate: true });
       } else {
         ph.style.display = 'none';
         ph.innerHTML = '';
@@ -6066,12 +6859,32 @@
     }
   }
 
+  function viewerGoToWorldPoint(wx, wy, opts) {
+    const x = Number(wx);
+    const y = Number(wy);
+    if (![x, y].every(Number.isFinite)) return;
+    const pad = opts && Number.isFinite(Number(opts.pad)) ? Number(opts.pad) : 1400;
+    // 현재 스케일 유지, 중심만 이동. 너무 확대/축소된 상태에서 길을 잃지 않게 bbox fit은 하지 않는다.
+    view.cx = x;
+    view.cy = y;
+    // 주변이 너무 빈 화면이면 약간 완화
+    if (Number.isFinite(pad) && pad > 0) {
+      // fitBounds는 스케일까지 바꿔서 사용자가 당황할 수 있어, 여기서는 snap/hover 갱신만
+      updateViewerSnapHover(x, y);
+    }
+    scheduleViewerRedraw();
+    const msg = $('msgExtract');
+    if (msg) {
+      msg.className = 'msg ok';
+      clearMsgTooltip(msg);
+      msg.textContent = '매칭된 단면 위치로 뷰를 이동했습니다.';
+    }
+  }
+
   function extractCategoryTableHint(category) {
     const hints = {
       column:
         '기둥(가로 표·피벗): 부호·동·주근·형태·대근·영문 필드·D·간격·치수·층 등 순입니다. 빈 칸은 도면에 해당 값이 없거나 파싱되지 않은 경우입니다.',
-      beam:
-        '보: 가로 Y묶음에서 와이드·Location 표를 먼저 인식하고, 아니면 부호 행부터 이어지는 행을 한 부재로 묶어 읽습니다. 표 영역은 위에서 지정합니다. 상·하부근 2단은 `11/11-D16` 형으로 맞춥니다.',
       wall: '벽체: 부호·동·치수·두께·층·철근 신호 순입니다.',
       slab: '슬라브: 부호·동·두께·층·배치 추정·치수·철근 신호 순입니다.',
     };
@@ -6202,17 +7015,18 @@
           '<p class="hint" style="margin:8px">행이 없습니다. 표 영역·Y허용·좌우 분리를 확인하세요. 디버그는 아래 패널에서 펼칩니다.</p>';
         return;
       }
-      const catSchemaBeam = getExtractTableSchema(run.category, vRun);
-      if (catSchemaBeam) {
-        host.innerHTML = renderExtractCategoryTable(run, catSchemaBeam);
-      } else {
-        host.innerHTML = renderBeamVerticalMemberTableHtml(run);
-      }
+      host.innerHTML =
+        '<p class="hint" style="margin:6px 8px 0;font-size:0.72rem;color:#57606a">행별 일람 필드 표는 표시하지 않습니다. 위쪽 <strong>부재별 표</strong>·Excel 결과를 사용하세요.</p>';
       return;
     }
     if (!rows.length) {
       host.innerHTML =
         '<p class="hint" style="margin:8px">행이 없습니다. 영역·레이어·Y허용·min_row_texts 등을 확인하세요.</p>';
+      return;
+    }
+    if (run.category === 'beam') {
+      host.innerHTML =
+        '<p class="hint" style="margin:6px 8px 0;font-size:0.72rem;color:#57606a">행별 일람 필드 표는 표시하지 않습니다. 위쪽 <strong>부재별 표</strong>·Excel 결과를 사용하세요.</p>';
       return;
     }
     const catSchema = getExtractTableSchema(run.category, vRun);
@@ -7281,11 +8095,13 @@
       }
 
       if (Array.isArray(m.zoneSectionLines) && m.zoneSectionLines.length) {
+        const zsServer = Array.isArray(v.beam_flat_zone_section_lines) ? v.beam_flat_zone_section_lines : [];
+        const zsSrc = flatMode && zsServer.length ? zsServer : m.zoneSectionLines;
         ctx.strokeStyle = 'rgba(34, 211, 238, 0.9)';
         ctx.lineWidth = 1.15;
         ctx.lineCap = 'round';
-        for (let zi = 0; zi < m.zoneSectionLines.length; zi++) {
-          const Zs = m.zoneSectionLines[zi];
+        for (let zi = 0; zi < zsSrc.length; zi++) {
+          const Zs = zsSrc[zi];
           const zf = Zs && Zs.from;
           const st = Zs && Zs.to;
           if (!zf || !st) continue;
@@ -7347,6 +8163,8 @@
     if (!Array.isArray(clusters) || !clusters.length) return null;
     const markRe = /^\s*[A-Z]{1,3}\s*\d{1,4}[A-Z]?\s*(?:\(.+\))?\s*$/i;
     const secReFlat = /^\s*\d{2,4}\s*(?:[xX×]\s*\d{2,4})?\s*(?:mm)?\s*$/i;
+    const v0 = (run && run.validation) || {};
+    const flatMode = beamLayoutResolvedFlat(v0);
     const rowYTol =
       Number(run && run.validation && run.validation.row_cluster_y_tolerance) ||
       Number(run && run.row_cluster_y_tolerance) ||
@@ -7476,6 +8294,18 @@
       return out;
     }
     sections = collectSectionsFromGeometry();
+    // flat: beamFlatEnsureMergedSectionAnalysis가 만든 섹션 중심 후보를 우선 사용(순환 의존 없이 안정)
+    if (flatMode && run && Array.isArray(run.__beamHzSectionsOverride) && run.__beamHzSectionsOverride.length) {
+      sections = run.__beamHzSectionsOverride
+        .map(function (s, idx) {
+          if (!s) return null;
+          const x = Number(s.x);
+          const y = Number(s.y);
+          if (![x, y].every(Number.isFinite)) return null;
+          return { key: String(s.key || ('flat_' + idx)), x: x, y: y, text: 'section(flat ' + (idx + 1) + ')' };
+        })
+        .filter(Boolean);
+    }
     if (!marks.length || !zones.length) return null;
 
     const markYMean = marks.reduce(function (a, mm) {
@@ -10582,6 +11412,7 @@
     if (!centers.length) {
       runB.beam_flat_merged_section_analysis = [];
       runB.beam_flat_center_links = [];
+      runB.__beamHzSectionsOverride = [];
       return [];
     }
     const eps = beamFlatPreviewCircleClusterEps(centers);
@@ -10622,6 +11453,24 @@
     const planeAnalyses = mergedGroups.map(function (g) {
       return beamFlatAnalyzeMergedSectionPlane(g, metaRows, segments, stirrupVerticalLikeSegs);
     });
+    // computeBeamHorizontalZoneMatches()가 섹션 후보를 안정적으로 쓰도록, 매칭 전에 flat 섹션 중심 후보를 runB에 저장한다.
+    // (beamFlatMemberZoneTextAnchors -> getCachedBeamHorizontalMatch 를 타기 때문에 순환 의존을 피해야 함)
+    runB.__beamHzSectionsOverride = (planeAnalyses || [])
+      .map(function (pl, idx) {
+        if (!pl) return null;
+        let cx = pl.centroid && Number(pl.centroid.x);
+        let cy = pl.centroid && Number(pl.centroid.y);
+        if (![cx, cy].every(Number.isFinite)) {
+          const bb = pl.section_bbox;
+          if (isFiniteBBox4(bb)) {
+            cx = (Number(bb[0]) + Number(bb[2])) * 0.5;
+            cy = (Number(bb[1]) + Number(bb[3])) * 0.5;
+          }
+        }
+        if (![cx, cy].every(Number.isFinite)) return null;
+        return { key: 'flat_' + idx, x: cx, y: cy };
+      })
+      .filter(Boolean);
     const mzAnchors = beamFlatMemberZoneTextAnchors(runB);
     const links = beamFlatNearestLowerSectionFromTextLinks(mzAnchors, planeAnalyses);
     const markAnchorByPlane = beamFlatMemberMarkAnchorBestByPlane(links);
@@ -10702,20 +11551,22 @@
         };
       });
     }
-    // 부재표기치수(BxH)를 단면별로 연결(여러 링크면 가까운 링크 우선) — 링크는 위에서 이미 계산됨
+    // 부재명·부위 텍스트는 link만 있으면 항상 주입(치수 파싱 실패와 무관)
+    // 부재표기치수(BxH)는 있을 때만(여러 링크면 가까운 링크 우선)
     const seen = {};
     for (let i = 0; i < links.length; i++) {
       const lk = links[i];
       const ti = lk && lk.to != null ? Number(lk.to) : NaN;
       if (!Number.isFinite(ti) || ti < 0 || ti >= planeAnalyses.length) continue;
-      const md = lk.memberMarkDims;
-      if (!md) continue;
       const sc = (Number(lk.dy) || 0) + (Number(lk.dx) || 0) * 0.2;
       if (seen[ti] != null && sc >= seen[ti]) continue;
       seen[ti] = sc;
-      planeAnalyses[ti].member_mark_dims = { width_mm: md.width_mm, depth_mm: md.depth_mm };
       planeAnalyses[ti].member_mark_text = String(lk.memberText || '');
       planeAnalyses[ti].member_zone_text = String(lk.zoneText || '');
+      const md = lk.memberMarkDims;
+      if (md) {
+        planeAnalyses[ti].member_mark_dims = { width_mm: md.width_mm, depth_mm: md.depth_mm };
+      }
     }
     runB.beam_flat_center_links = links;
     runB.beam_flat_merged_section_analysis = planeAnalyses.filter(Boolean);
@@ -10790,14 +11641,15 @@
         const lk = centerLinks[i];
         const ti = lk && lk.to != null ? Number(lk.to) : NaN;
         if (!Number.isFinite(ti) || ti < 0 || ti >= planeAnalyses.length) continue;
-        const md = lk.memberMarkDims;
-        if (!md) continue;
         const sc = (Number(lk.dy) || 0) + (Number(lk.dx) || 0) * 0.2;
         if (seen[ti] != null && sc >= seen[ti]) continue;
         seen[ti] = sc;
-        planeAnalyses[ti].member_mark_dims = { width_mm: md.width_mm, depth_mm: md.depth_mm };
         planeAnalyses[ti].member_mark_text = String(lk.memberText || '');
         planeAnalyses[ti].member_zone_text = String(lk.zoneText || '');
+        const md = lk.memberMarkDims;
+        if (md) {
+          planeAnalyses[ti].member_mark_dims = { width_mm: md.width_mm, depth_mm: md.depth_mm };
+        }
       }
     }
     if (runB) {
@@ -11265,37 +12117,34 @@
     if (beamFlat) {
       // flat 단일 경로: 브라우저 원·선 패턴(오버레이) + 서버 매칭 결과(부재명/부위) 라벨을 같이 표시
       drawBeamFlatCircleOnlyOverlays(ctx, runB);
-      const rows = Array.isArray(runB.rows) ? runB.rows : [];
-      ctx.save();
-      ctx.globalAlpha = 0.96;
-      ctx.font = 'bold 11px ui-monospace, Consolas, sans-serif';
-      ctx.textAlign = 'left';
-      ctx.textBaseline = 'top';
-      ctx.fillStyle = 'rgba(168, 85, 247, 0.95)';
-      ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-      ctx.lineWidth = 3;
-      for (let ri = 0; ri < rows.length; ri++) {
-        const r = rows[ri] || {};
-        const zones = Array.isArray(r.beam_section_geometry_zones) ? r.beam_section_geometry_zones : [];
-        const blocks = zones.length ? zones : [{ section_geometry: r.section_geometry, slab_index: 0 }];
-        for (let zi = 0; zi < blocks.length; zi++) {
-          const z = blocks[zi] || {};
-          const sg = z.section_geometry || {};
-          const bb = isFiniteBBox4(sg.search_bbox) ? sg.search_bbox : (isFiniteBBox4(sg.search_bbox_loose) ? sg.search_bbox_loose : null);
-          if (!bb) continue;
+      // 단면별 부재/부위 표시는 “프론트 picked(정답)” 기준으로만 한다.
+      // (서버 member_mark_text/member_zone_text는 아직 오차가 있을 수 있어 혼동 방지)
+      const arr = Array.isArray(runB.beam_flat_merged_section_analysis) ? runB.beam_flat_merged_section_analysis : [];
+      if (arr && arr.length) {
+        ctx.save();
+        ctx.globalAlpha = 0.96;
+        ctx.font = 'bold 11px ui-monospace, Consolas, sans-serif';
+        ctx.textAlign = 'left';
+        ctx.textBaseline = 'top';
+        ctx.fillStyle = 'rgba(168, 85, 247, 0.95)';
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 3;
+        for (let i = 0; i < arr.length; i++) {
+          const pl = arr[i] || {};
+          const bb = pl.section_bbox;
+          if (!isFiniteBBox4(bb)) continue;
           const x0 = Math.min(Number(bb[0]), Number(bb[2]));
           const y0 = Math.min(Number(bb[1]), Number(bb[3]));
           if (![x0, y0].every(Number.isFinite)) continue;
-          const mm = String(z.member_mark_text || r.member_mark_text || r.mark || r.name || '').trim();
-          const mz = String(z.member_zone_text || r.member_zone_text || '').trim();
-          const t = '#' + (ri + 1) + (mm ? ' ' + mm : '') + (mz ? ' ·' + mz : '');
-          if (!t.trim()) continue;
+          const mm = String(pl.member_mark_text || '').trim();
+          const mz = String(pl.member_zone_text || '').trim();
+          const t = '#' + (i + 1) + (mm ? ' ' + mm : '') + (mz ? ' ·' + mz : '');
           const p = worldToScreen(x0, y0);
           ctx.strokeText(t, p[0] + 2, p[1] + 2);
           ctx.fillText(t, p[0] + 2, p[1] + 2);
         }
+        ctx.restore();
       }
-      ctx.restore();
       return;
     }
     const brows = runB.rows || [];
@@ -14463,6 +15312,16 @@
       const hit = ev.target && ev.target.closest && ev.target.closest('[data-extract-nav-row]');
       if (!hit) return;
       if (ev.target.closest('a,button,input,select,textarea,summary')) return;
+      const wxRaw = hit.getAttribute('data-extract-nav-wx');
+      const wyRaw = hit.getAttribute('data-extract-nav-wy');
+      if (wxRaw != null && wyRaw != null && wxRaw !== '' && wyRaw !== '') {
+        const wx = parseFloat(wxRaw);
+        const wy = parseFloat(wyRaw);
+        if ([wx, wy].every(Number.isFinite)) {
+          viewerGoToWorldPoint(wx, wy, { pad: 1600 });
+          return;
+        }
+      }
       const raw = hit.getAttribute('data-extract-nav-row');
       if (raw == null || raw === '') return;
       const ri = parseInt(raw, 10);
@@ -14686,8 +15545,26 @@
     });
     ws['!cols'] = colWidths;
     const wb = XLSX.utils.book_new();
-    const vb = lastRun.validation && lastRun.validation.column_vertical_blocks;
-    const vbb = lastRun.validation && beamValidationPolyNav(lastRun.validation);
+    const v = lastRun.validation || {};
+    const vb = v && v.column_vertical_blocks;
+    const vbb = v && beamValidationPolyNav(v);
+    function aoaFromRenderedMemberTable() {
+      const host = $('extractMemberTableHost');
+      if (!host) return null;
+      const tbl = host.querySelector && host.querySelector('table');
+      if (!tbl) return null;
+      const aoa = [];
+      const trs = tbl.querySelectorAll('tr');
+      trs.forEach((tr) => {
+        const cells = [];
+        tr.querySelectorAll('th,td').forEach((td) => {
+          const t = (td && td.textContent != null ? String(td.textContent) : '').replace(/\s+/g, ' ').trim();
+          cells.push(t);
+        });
+        if (cells.length) aoa.push(cells);
+      });
+      return aoa.length ? aoa : null;
+    }
     if (vb) {
       const tidyAoa = buildVerticalTidyAoa(rows, lastRun.validation);
       const wsTidy = XLSX.utils.aoa_to_sheet(tidyAoa);
@@ -14706,7 +15583,34 @@
       wsTidy['!cols'] = tcolW;
       XLSX.utils.book_append_sheet(wb, wsTidy, '부재');
     } else if (vbb) {
-      const tidyAoa = buildBeamVerticalTidyAoa(rows, lastRun.validation);
+      // 화면의 부재별표와 엑셀 '보_부재'를 1:1 동일하게 만들기 위해,
+      // 이미 렌더된 표가 있으면 DOM을 그대로 AOA로 추출해 사용한다.
+      const tidyAoa = aoaFromRenderedMemberTable() || buildBeamVerticalTidyAoa(rows, lastRun.validation);
+      const wsTidy = XLSX.utils.aoa_to_sheet(tidyAoa);
+      const tw = tidyAoa[0] ? tidyAoa[0].length : 1;
+      const tcolW = [];
+      for (let c = 0; c < tw; c++) {
+        let m = 10;
+        tidyAoa.forEach((row) => {
+          const s = row[c] != null ? String(row[c]) : '';
+          const len = s.length;
+          const w = Math.min(42, Math.max(8, Math.ceil(len * 0.88) + 1));
+          if (w > m) m = w;
+        });
+        tcolW.push({ wch: m });
+      }
+      wsTidy['!cols'] = tcolW;
+      XLSX.utils.book_append_sheet(wb, wsTidy, '보_부재');
+    }
+    /* 보(flat) 서버 부재별표는 세로블록 여부와 무관하게 엑셀에 포함 */
+    if (
+      catX === 'beam' &&
+      !vb &&
+      !vbb &&
+      Array.isArray(v.beam_flat_member_table_rows) &&
+      v.beam_flat_member_table_rows.length
+    ) {
+      const tidyAoa = aoaFromRenderedMemberTable() || buildBeamVerticalTidyAoa(rows, lastRun.validation);
       const wsTidy = XLSX.utils.aoa_to_sheet(tidyAoa);
       const tw = tidyAoa[0] ? tidyAoa[0].length : 1;
       const tcolW = [];
@@ -14844,7 +15748,7 @@
     ev.preventDefault();
     const cat = typeof activeExtractTabKey === 'function' ? activeExtractTabKey() : '';
     const t =
-      (cat === 'beam' && window.__lastBeamVerticalDebugPlain) ||
+      (cat === 'beam' && (window.__lastBeamMemberTableDebugPlain || window.__lastBeamVerticalDebugPlain)) ||
       window.__lastColumnVerticalDebugPlain ||
       '';
     if (!t) {

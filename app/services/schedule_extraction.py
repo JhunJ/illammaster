@@ -2932,6 +2932,104 @@ def build_beam_flat_member_zone_match_lines(rows: list[dict[str, Any]]) -> list[
     return out
 
 
+def _apply_beam_flat_picked_to_rows(rows: list[dict[str, Any]], picked: list[dict[str, Any]]) -> None:
+    """
+    서버 `beam_flat_picked`(프론트 동일 매칭) 결과를 rows_out의 슬랩(zone_entry)에 주입한다.
+    - member_mark_text/anchor: picked.member
+    - member_zone_text/anchor: picked.zone (단일 값으로 정규화)
+
+    picked에는 slab_index가 없으므로, zone 라벨의 x가 zone_entry의 x-slab bbox 안에 들어가는 것으로 매칭한다.
+    """
+    if not rows or not picked:
+        return
+
+    # row 별 picked 후보(부재명 텍스트 기준)로 인덱싱
+    by_mark: dict[str, list[dict[str, Any]]] = {}
+    for p in picked:
+        m = p.get("member") if isinstance(p, dict) else None
+        z = p.get("zone") if isinstance(p, dict) else None
+        if not (isinstance(m, dict) and isinstance(z, dict)):
+            continue
+        mt = str(m.get("text") or "").strip()
+        if not mt:
+            continue
+        by_mark.setdefault(mt, []).append(p)
+
+    def _pick_for_slab(mark_txt: str, x0: float, x1: float) -> dict[str, Any] | None:
+        cand = by_mark.get(mark_txt) or []
+        if not cand:
+            return None
+        best = None
+        best_s = float("inf")
+        for p in cand:
+            z = p.get("zone") if isinstance(p, dict) else None
+            if not isinstance(z, dict):
+                continue
+            try:
+                zx = float(z.get("x"))
+            except (TypeError, ValueError):
+                continue
+            if zx < (x0 - 180.0) or zx > (x1 + 180.0):
+                continue
+            # slab 내부에 들어오는 zone 중, slab 중앙에 가까운 것을 선택
+            cx = 0.5 * (x0 + x1)
+            s = abs(zx - cx)
+            if s < best_s:
+                best_s = s
+                best = p
+        return best
+
+    for ri, r in enumerate(rows):
+        zones = r.get("beam_section_geometry_zones")
+        blocks: list[dict[str, Any]] = (
+            [z for z in zones if isinstance(z, dict)] if isinstance(zones, list) and zones else []
+        )
+        if not blocks:
+            continue
+        # zone_entry에 이미 채워진 member_mark_text가 있으면 우선 사용
+        row_mark = str(r.get("mark") or r.get("name") or "").strip()
+        for zi, z in enumerate(blocks):
+            bb = z.get("row_entity_bbox")
+            if not isinstance(bb, (list, tuple)) or len(bb) < 4:
+                continue
+            try:
+                x0, x1 = float(bb[0]), float(bb[2])
+            except (TypeError, ValueError):
+                continue
+            if x1 <= x0:
+                continue
+            mark_txt = str(z.get("member_mark_text") or row_mark or "").strip()
+            if not mark_txt:
+                continue
+            p = _pick_for_slab(mark_txt, x0, x1)
+            if not p:
+                continue
+            m = p.get("member") if isinstance(p, dict) else None
+            zo = p.get("zone") if isinstance(p, dict) else None
+            if isinstance(m, dict):
+                mt = str(m.get("text") or "").strip()
+                if mt:
+                    z["member_mark_text"] = mt
+                try:
+                    z["member_mark_anchor"] = {
+                        "x": round(float(m.get("x")), 4),
+                        "y": round(float(m.get("y")), 4),
+                    }
+                except (TypeError, ValueError):
+                    pass
+            if isinstance(zo, dict):
+                zt = str(zo.get("text") or "").strip()
+                if zt:
+                    z["member_zone_text"] = zt
+                try:
+                    z["member_zone_anchor"] = {
+                        "x": round(float(zo.get("x")), 4),
+                        "y": round(float(zo.get("y")), 4),
+                    }
+                except (TypeError, ValueError):
+                    pass
+
+
 def extract_schedule(
     db: Session,
     commit_id: int,
@@ -3147,12 +3245,48 @@ def extract_schedule(
                     half_height=_optional_positive_float(raw, "column_section_half_height"),
                     include_block_definitions=raw.get("column_section_block_geometry", True) is not False,
                     selection_world_bboxes=clip_arg,
+                    label_pool=items,
                 )
                 validation["beam_flat_section_geometry"] = True
             except Exception as ex:
                 validation["section_geometry_error"] = f"{type(ex).__name__}: {ex}"[:400]
         else:
             validation["beam_section_geo_branch"] = "none"
+
+        # 프론트(기존) 방식과 동일한 부재-부위-단면(picked) 서버 재현: selection bbox 안 원(CIRCLE) 중심 기반
+        try:
+            from app.services.beam_flat_frontend_match import (
+                collect_beam_flat_section_candidates_from_selection,
+                compute_beam_horizontal_picked_server,
+            )
+
+            secs = collect_beam_flat_section_candidates_from_selection(
+                db,
+                commit_id,
+                clip_arg,
+                include_block_definitions=raw.get("column_section_block_geometry", True) is not False,
+            )
+            hz = compute_beam_horizontal_picked_server(
+                validation.get("beam_row_clusters") or [],
+                items,
+                secs,
+                row_y_tol=float(validation.get("row_cluster_y_tolerance") or cfg.y_tolerance or 10),
+            )
+            if hz:
+                validation["beam_flat_picked"] = hz.get("picked") or []
+                validation["beam_flat_zone_section_lines"] = hz.get("zoneSectionLines") or []
+                validation["beam_flat_member_zone_lines"] = hz.get("memberZoneLines") or []
+                validation["beam_flat_section_candidates"] = [
+                    {"key": s.key, "x": round(float(s.x), 4), "y": round(float(s.y), 4), "bbox": [round(v, 4) for v in s.bbox]}
+                    for s in secs
+                ]
+                # picked(단일 부위 라벨)를 zone_entry에 주입해 표/엑셀/매칭선에 동일 반영
+                try:
+                    _apply_beam_flat_picked_to_rows(rows_out, validation["beam_flat_picked"])
+                except Exception:
+                    pass
+        except Exception as ex:
+            validation["beam_flat_picked_error"] = f"{type(ex).__name__}: {ex}"[:300]
 
         try:
             validation["beam_flat_member_table_rows"] = build_beam_flat_member_table_rows(rows_out)

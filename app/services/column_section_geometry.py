@@ -2259,9 +2259,16 @@ def _beam_flat_enrich_zone_metadata(
             break
 
     if not zone_txt:
+        # 세로블록 템플릿/헤더에서 만들어진 "END CEN END ..." 같은 덩어리 문자열은
+        # 슬랩 단위 member_zone_text로 쓰면 표/엑셀에 오염된다. (picked 주입이 1순위)
         z2 = str(orig_row.get("beam_vertical_zone_display_label") or "").strip()
         if z2:
-            zone_txt = z2
+            z2u = re.sub(r"\s+", " ", z2).strip().upper()
+            # 단일 토큰만 허용
+            for tok in ("INT", "CEN", "CENTER", "EXT", "END", "ALL"):
+                if re.fullmatch(tok, z2u):
+                    zone_txt = z2u
+                    break
 
     zone_entry["member_mark_text"] = mark_txt
     zone_entry["member_zone_text"] = zone_txt
@@ -2321,6 +2328,7 @@ def enrich_rows_beam_flat_section_geometry(
     half_height: Optional[float] = None,
     include_block_definitions: bool = True,
     selection_world_bboxes: list[tuple[float, float, float, float]] | None = None,
+    label_pool: list[dict[str, Any]] | None = None,
 ) -> None:
     """가로 flat 보: `_flat_sorted_entities`가 있으면 X 간격으로 열(슬랩)을 나눠 열마다 단면 enrich.
 
@@ -2483,7 +2491,9 @@ def enrich_rows_beam_flat_section_geometry(
         for k in ("width_mm", "depth_mm", "size_mm", "SIZE"):
             if primary_src and k in primary_src and primary_src.get(k) is not None:
                 rows[orig_i][k] = primary_src[k]
-        flat_ents = rows[orig_i].get("_flat_sorted_entities")
+        # 프론트 방식에 맞추기 위해: 가능하면 도면 전체 텍스트 풀(items)로 부재/부위 앵커를 잡는다.
+        # (row_cluster_bundle에서 행 내부 텍스트만 쓰면 END/CEN/INT 등이 누락될 수 있음)
+        flat_ents = label_pool if isinstance(label_pool, list) and label_pool else rows[orig_i].get("_flat_sorted_entities")
         if not isinstance(flat_ents, list):
             flat_ents = []
         for z in zlist:
