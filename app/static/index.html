@@ -10686,7 +10686,14 @@
 
     if (pl.below_text_role_values && typeof pl.below_text_role_values === 'object') {
       const rv = pl.below_text_role_values;
-      const sizeLine = rv['크기'] ? '크기(읽음): ' + rv['크기'] : '';
+      let sizeLine = rv['크기'] ? '크기(읽음): ' + rv['크기'] : '';
+      if (!sizeLine && pl.member_mark_dims && Number.isFinite(Number(pl.member_mark_dims.width_mm)) && Number.isFinite(Number(pl.member_mark_dims.depth_mm))) {
+        sizeLine =
+          '크기(표기): ' +
+          Math.round(Number(pl.member_mark_dims.width_mm)) +
+          '×' +
+          Math.round(Number(pl.member_mark_dims.depth_mm));
+      }
       const rebarLines = [];
       if (rv['상부근']) rebarLines.push('상부근(읽음): ' + rv['상부근']);
       if (rv['하부근']) rebarLines.push('하부근(읽음): ' + rv['하부근']);
@@ -10849,6 +10856,9 @@
       if (beamFlatBelowTextRole(c.text)) continue;
       const txt = String(c.text || '').trim();
       if (!txt || !beamFlatIsSectionBxHSizeText(txt)) continue;
+      // 부재명+괄호치수(RG11C(1000x900))는 "크기" 후보로 쓰지 않는다.
+      // 이런 텍스트는 보통 부재명 열/상부에 있고, 단면 하단(스트럽 하부) 크기 매칭을 오염시킨다.
+      if (beamFlatLooksLikeMemberMarkText(txt) || beamFlatLooksLikeMemberMarkWithDimsText(txt)) continue;
       const dx = Number.isFinite(Number(c.dx)) ? Math.abs(Number(c.dx)) : Infinity;
       const dy = Number.isFinite(Number(c.dy)) ? Math.abs(Number(c.dy)) : Infinity;
       const s = dx * 0.22 + dy * 0.04 + (Number(c.score) || 0) * 0.001;
@@ -10885,6 +10895,7 @@
       const raw = String(c.text || '').trim();
       if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
       if (beamFlatBelowTextRole(raw)) continue;
+      if (beamFlatLooksLikeMemberMarkText(raw) || beamFlatLooksLikeMemberMarkWithDimsText(raw)) continue;
       const tx = Number(c.x);
       const ty = Number(c.y);
       if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
@@ -10922,6 +10933,7 @@
       const raw = String(c.text || '').trim();
       if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
       if (beamFlatBelowTextRole(raw)) continue;
+      if (beamFlatLooksLikeMemberMarkText(raw) || beamFlatLooksLikeMemberMarkWithDimsText(raw)) continue;
       const tx = Number(c.x);
       const ty = Number(c.y);
       if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
@@ -10960,6 +10972,7 @@
       const raw = String(c.text || '').trim();
       if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
       if (beamFlatBelowTextRole(raw)) continue;
+      if (beamFlatLooksLikeMemberMarkText(raw) || beamFlatLooksLikeMemberMarkWithDimsText(raw)) continue;
       const tx = Number(c.x);
       const ty = Number(c.y);
       if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
@@ -10997,6 +11010,7 @@
       const raw = String(c.text || '').trim();
       if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
       if (beamFlatBelowTextRole(raw)) continue;
+      if (beamFlatLooksLikeMemberMarkText(raw) || beamFlatLooksLikeMemberMarkWithDimsText(raw)) continue;
       const tx = Number(c.x);
       const ty = Number(c.y);
       if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
@@ -11043,6 +11057,7 @@
       const raw = String(c.text || '').trim();
       if (!raw || !beamFlatIsSectionBxHSizeText(raw)) continue;
       if (beamFlatBelowTextRole(raw)) continue;
+      if (beamFlatLooksLikeMemberMarkText(raw) || beamFlatLooksLikeMemberMarkWithDimsText(raw)) continue;
       const tx = Number(c.x);
       const ty = Number(c.y);
       if (!Number.isFinite(tx) || !Number.isFinite(ty)) continue;
@@ -12224,6 +12239,16 @@
     const h = Number(m[2]);
     if (!Number.isFinite(w) || !Number.isFinite(h)) return null;
     return { width_mm: w, depth_mm: h };
+  }
+
+  /** 부재명+괄호치수(예: RG11C(1000x900)) — 크기(B×H) 하부매칭 후보에서 제외용 */
+  function beamFlatLooksLikeMemberMarkWithDimsText(t) {
+    const s = String(t || '').replace(/\s+/g, ' ').trim();
+    if (!s) return false;
+    // 괄호 안에 B×H가 있고, 괄호 밖에 문자가 포함되면 "부재명+치수"로 본다.
+    if (!/\(\s*\d{2,5}\s*[xX×]\s*\d{2,5}\s*\)/.test(s)) return false;
+    const outside = s.replace(/\(\s*\d{2,5}\s*[xX×]\s*\d{2,5}\s*\)/g, ' ');
+    return /[A-Za-z가-힣]/.test(outside);
   }
 
   /** 텍스트(부재-부위) 앵커별로, 바로 아래 단면 중심 1개를 연결 */

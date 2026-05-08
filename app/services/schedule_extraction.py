@@ -3113,6 +3113,7 @@ def extract_schedule(
         beam_zs_lines_all: list[dict[str, Any]] = []
         beam_picked_all: list[dict[str, Any]] = []
         beam_secs_all: list[dict[str, Any]] = []
+        beam_member_table_rows_all: list[dict[str, Any]] = []
         for bi, bx in enumerate(selection_bboxes):
             cfg2 = dict(raw)
             cfg2["__bbox_split"] = True
@@ -3163,6 +3164,24 @@ def extract_schedule(
                                     dst.append(it)
                     except Exception:
                         pass
+                try:
+                    mtr = val_i.get("beam_flat_member_table_rows")
+                    if isinstance(mtr, list) and mtr:
+                        for it in mtr:
+                            if not isinstance(it, dict):
+                                continue
+                            ii = dict(it)
+                            ii["bbox_index"] = bi
+                            # bbox별 결과의 source_row_index는 rows_i 기준이므로, 합친 rows_all 기준으로 offset 보정
+                            try:
+                                sri = ii.get("source_row_index")
+                                if isinstance(sri, (int, float)) and int(sri) >= 0:
+                                    ii["source_row_index"] = int(sri) + int(offset)
+                            except Exception:
+                                pass
+                            beam_member_table_rows_all.append(ii)
+                except Exception:
+                    pass
             offset += len(rows_i)
             regions.append(
                 {
@@ -3194,6 +3213,8 @@ def extract_schedule(
                 base["beam_flat_picked"] = beam_picked_all
             if beam_secs_all:
                 base["beam_flat_section_candidates"] = beam_secs_all
+            if beam_member_table_rows_all:
+                base["beam_flat_member_table_rows"] = beam_member_table_rows_all
         validation = base
         return rows_all, validation
 
