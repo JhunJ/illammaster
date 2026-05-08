@@ -6,7 +6,7 @@ from __future__ import annotations
 
 import math
 import re
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any, Callable
 
 from geoalchemy2.functions import ST_Intersects, ST_MakeEnvelope
@@ -3098,6 +3098,104 @@ def extract_schedule(
             selection_bbox = None
 
     selection_bboxes = _parse_selection_bboxes(raw)
+
+    # 여러 표 영역을 저장한 경우: 영역끼리 텍스트/클러스터가 섞이지 않도록
+    # bbox별로 "완전 독립" 추출을 수행한 뒤 결과를 합친다.
+    if selection_bboxes and not bool(raw.get("__bbox_split")):
+        rows_all: list[dict[str, Any]] = []
+        regions: list[dict[str, Any]] = []
+        vals: list[dict[str, Any]] = []
+        dup_all: list[int] = []
+        offset = 0
+        # beam 전용: bbox별 디버그/오버레이를 합쳐 프론트에서 그대로 사용 가능하게 만든다.
+        beam_row_clusters_all: list[dict[str, Any]] = []
+        beam_mz_lines_all: list[dict[str, Any]] = []
+        beam_zs_lines_all: list[dict[str, Any]] = []
+        beam_picked_all: list[dict[str, Any]] = []
+        beam_secs_all: list[dict[str, Any]] = []
+        for bi, bx in enumerate(selection_bboxes):
+            cfg2 = dict(raw)
+            cfg2["__bbox_split"] = True
+            cfg2["selection_bboxes"] = []
+            cfg2["selection_bbox"] = list(bx)
+            rows_i, val_i = extract_schedule(db, commit_id, category, cfg2)
+            for r in rows_i:
+                if isinstance(r, dict):
+                    r["_selection_bbox_index"] = bi
+                    r["_selection_bbox"] = list(bx)
+            rows_all.extend(rows_i)
+            vals.append(val_i if isinstance(val_i, dict) else {})
+            try:
+                di = val_i.get("duplicate_row_indices") if isinstance(val_i, dict) else None
+                if isinstance(di, list) and di:
+                    dup_all.extend([offset + int(x) for x in di if isinstance(x, int) or str(x).isdigit()])
+            except Exception:
+                pass
+            if category == CATEGORY_BEAM and isinstance(val_i, dict):
+                try:
+                    brc = val_i.get("beam_row_clusters")
+                    if isinstance(brc, list):
+                        for c in brc:
+                            if not isinstance(c, dict):
+                                continue
+                            cc = dict(c)
+                            cc["bbox_index"] = bi
+                            cc["row_index_local"] = cc.get("row_index")
+                            cc["row_index"] = len(beam_row_clusters_all)
+                            beam_row_clusters_all.append(cc)
+                except Exception:
+                    pass
+                for key, dst in (
+                    ("beam_flat_member_zone_lines", beam_mz_lines_all),
+                    ("beam_flat_zone_section_lines", beam_zs_lines_all),
+                    ("beam_flat_picked", beam_picked_all),
+                    ("beam_flat_section_candidates", beam_secs_all),
+                ):
+                    try:
+                        arr = val_i.get(key)
+                        if isinstance(arr, list) and arr:
+                            for it in arr:
+                                if isinstance(it, dict):
+                                    ii = dict(it)
+                                    ii["bbox_index"] = bi
+                                    dst.append(ii)
+                                else:
+                                    dst.append(it)
+                    except Exception:
+                        pass
+            offset += len(rows_i)
+            regions.append(
+                {
+                    "bbox_index": bi,
+                    "selection_bbox": list(bx),
+                    "text_entity_count": int(val_i.get("text_entity_count") or 0),
+                    "row_count": int(val_i.get("row_count") or 0),
+                    "validation": val_i,
+                }
+            )
+        # 프론트가 기대하는 validation 키를 최대한 유지: 1번 bbox의 validation을 베이스로 둔다.
+        base = vals[0].copy() if vals and isinstance(vals[0], dict) else {"category": category}
+        base["selection_bbox"] = None
+        base["selection_bboxes"] = [list(b) for b in selection_bboxes]
+        base["split_by_selection_bboxes"] = True
+        base["regions"] = regions
+        base["text_entity_count"] = sum(int(r.get("text_entity_count") or 0) for r in regions)
+        base["row_count"] = len(rows_all)
+        if dup_all:
+            base["duplicate_row_indices"] = sorted(set(int(x) for x in dup_all if isinstance(x, int)))
+        if category == CATEGORY_BEAM:
+            if beam_row_clusters_all:
+                base["beam_row_clusters"] = beam_row_clusters_all
+            if beam_mz_lines_all:
+                base["beam_flat_member_zone_lines"] = beam_mz_lines_all
+            if beam_zs_lines_all:
+                base["beam_flat_zone_section_lines"] = beam_zs_lines_all
+            if beam_picked_all:
+                base["beam_flat_picked"] = beam_picked_all
+            if beam_secs_all:
+                base["beam_flat_section_candidates"] = beam_secs_all
+        validation = base
+        return rows_all, validation
 
     csg = raw.get("column_strip_gap")
     column_strip_gap: float | None

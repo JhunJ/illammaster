@@ -1197,6 +1197,16 @@
             <input type="checkbox" id="chkColumnSectionOverlay" checked />
             <span>단면 오버레이(박스·화면 디버그 요약)</span>
           </label>
+          <label
+            id="labelBeamRowClusterOverlayVis"
+            class="cad-mini"
+            style="display: flex; margin-top: 6px; align-items: center; gap: 6px"
+            title="보 탭에서만: R띠(가로줄) 디버그 오버레이 표시/숨김"
+            hidden
+          >
+            <input type="checkbox" id="chkBeamRowClusterOverlayVis" checked />
+            <span>가로줄 디버그(R띠) 표시</span>
+          </label>
         </div>
       </div>
       <div class="btn-row extract-main-extract-row">
@@ -1811,6 +1821,8 @@
     const ovLab = $('labelColumnSectionOverlay');
     /* 단면 오버레이는 기둥·보 세로 블록 모두에 적용되므로 두 탭에서 토글을 보이게 한다. */
     if (ovLab) ovLab.style.display = IllamExtractCatalog.usesScheduleSelectionBBox(cat) ? '' : 'none';
+    const rowOv = $('labelBeamRowClusterOverlayVis');
+    if (rowOv) rowOv.hidden = cat !== 'beam';
   }
 
   function refreshExtractResultForActiveTab() {
@@ -1891,6 +1903,7 @@
   let columnBboxSelectDown = null;
   /** 기둥 추출 결과의 section_geometry 를 캔버스에 겹쳐 그릴지 (부재·단면 매칭 확인용) */
   let showColumnSectionOverlays = true;
+  let showBeamRowClusterOverlays = true;
   /** 보 flat: 원·근처선으로 만든 개별 unitBb(병합 전) 박스 표시 */
   let showBeamFlatPremergeUnitBb = false;
   /** 보 flat 단면 파이프라인 단계별 bbox 디버그 */
@@ -8099,6 +8112,8 @@
     const labMap = buildPreviewLabelEidMap();
     const m = getCachedBeamHorizontalMatch(run, labMap);
     const flatMode = beamLayoutResolvedFlat(v);
+    const splitMode = !!v.split_by_selection_bboxes;
+    const pickedServer = Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked : [];
     const vw = visibleWorldBounds();
     const sc = Math.max(Number(view && view.scale) || 1, 1e-9);
     const rowYTolDraw = Math.max(
@@ -8107,13 +8122,14 @@
     );
 
     /** 부재·부위 Y 기준으로 가장 가까운 beam_row_cluster bbox → 가로 강조선이 띠 밖으로 안 뻗게 */
-    function clusterWorldXSpanForMemberZone(mem, zon) {
+    function clusterWorldXSpanForMemberZone(mem, zon, bboxIndex) {
       const yRef = (Number(mem.y) + Number(zon.y)) * 0.5;
       if (!Number.isFinite(yRef)) return null;
       let best = null;
       let bestD = Infinity;
       for (let ci = 0; ci < clusters.length; ci++) {
         const c = clusters[ci];
+        if (bboxIndex != null && c && c.bbox_index != null && Number(c.bbox_index) !== Number(bboxIndex)) continue;
         const ym = Number(c.y_mean);
         if (!Number.isFinite(ym)) continue;
         const d = Math.abs(ym - yRef);
@@ -8161,16 +8177,20 @@
     ctx.globalAlpha = 0.96;
     ctx.setLineDash([]);
 
-    if (m && Array.isArray(m.picked) && m.picked.length) {
-      // 기존 프론트 규칙(picked)을 flat에서도 그대로 표시해야 한다.
-      for (let pi = 0; pi < m.picked.length; pi++) {
-        const p = m.picked[pi];
+    const pickedSrc =
+      splitMode && pickedServer.length
+        ? pickedServer
+        : (m && Array.isArray(m.picked) && m.picked.length ? m.picked : []);
+    if (pickedSrc && pickedSrc.length) {
+      // split(표 영역 분리) 모드에서는 서버 picked를 우선 사용해 표끼리 침범을 차단한다.
+      for (let pi = 0; pi < pickedSrc.length; pi++) {
+        const p = pickedSrc[pi];
         const mem = p.member;
         const zon = p.zone;
         const sec = p.section;
         if (!mem || !zon) continue;
         const hue = (pi * 47 + 18) % 360;
-        const rowSpan = clusterWorldXSpanForMemberZone(mem, zon);
+        const rowSpan = clusterWorldXSpanForMemberZone(mem, zon, p.bbox_index);
         const layers = [
           { x: Number(mem.x), y: Number(mem.y), w: 1.75, r: 3.1, col: 'hsla(' + hue + ',84%,36%,0.96)' },
           { x: Number(zon.x), y: Number(zon.y), w: 1.65, r: 2.9, col: 'hsla(' + hue + ',72%,40%,0.94)' },
@@ -8211,16 +8231,20 @@
         }
       }
 
-      // 기존 프론트 결과(memberZoneLines/picked)를 “정답”으로 유지한다.
-      // 서버 승격 결과는 별도 디버그/비교용으로만 사용(여기서는 대체하지 않음).
+      // 표 영역 다중(bbox split)일 때: bbox별로 계산한 서버 선을 사용해야 한다.
+      const mzServer = Array.isArray(v.beam_flat_member_zone_lines) ? v.beam_flat_member_zone_lines : [];
       const mzSrc =
-        Array.isArray(m.memberZoneLines) && m.memberZoneLines.length
-          ? m.memberZoneLines
-          : m.picked
-              .map(function (p) {
-                return p && p.member && p.zone ? { from: p.member, to: p.zone } : null;
-              })
-              .filter(Boolean);
+        splitMode && mzServer.length
+          ? mzServer
+          : flatMode && mzServer.length
+              ? mzServer
+              : Array.isArray(m.memberZoneLines) && m.memberZoneLines.length
+              ? m.memberZoneLines
+              : pickedSrc
+                  .map(function (p) {
+                    return p && p.member && p.zone ? { from: p.member, to: p.zone, bbox_index: p.bbox_index } : null;
+                  })
+                  .filter(Boolean);
       /* lineWidth는 캔버스 CSS 픽셀 — view.scale로 나누면 축소 시 비정상적으로 굵어짐 */
       ctx.strokeStyle = 'rgba(168, 85, 247, 0.95)';
       ctx.lineWidth = 1.25;
@@ -8859,6 +8883,28 @@
 
   function getCachedBeamHorizontalMatch(run, labMap) {
     if (!run || !run.validation) return null;
+    // 표 영역을 bbox별로 독립 계산한 경우: 서버가 만든 매칭선을 그대로 쓴다(프론트 전역 계산은 표끼리 침범).
+    const v0 = run.validation || {};
+    if (v0 && v0.split_by_selection_bboxes) {
+      const mzS = Array.isArray(v0.beam_flat_member_zone_lines) ? v0.beam_flat_member_zone_lines : [];
+      const zsS = Array.isArray(v0.beam_flat_zone_section_lines) ? v0.beam_flat_zone_section_lines : [];
+      const pkS = Array.isArray(v0.beam_flat_picked) ? v0.beam_flat_picked : [];
+      if (mzS.length || zsS.length || pkS.length) {
+        const sigS =
+          (run.id != null ? String(run.id) : '0') +
+          ':srv:' +
+          mzS.length +
+          ':' +
+          zsS.length +
+          ':' +
+          pkS.length;
+        if (run.__beamHzMatchSig === sigS && run.__beamHzMatch) return run.__beamHzMatch;
+        const mm = { memberZoneLines: mzS, zoneSectionLines: zsS, picked: pkS };
+        run.__beamHzMatchSig = sigS;
+        run.__beamHzMatch = mm;
+        return mm;
+      }
+    }
     const clusters = run.validation.beam_row_clusters;
     if (!Array.isArray(clusters) || !clusters.length) return null;
     const sz = labMap && labMap.size ? labMap.size : 0;
@@ -17033,6 +17079,21 @@
         window.clearInterval(_storyErrPulseTimer);
         _storyErrPulseTimer = 0;
       }
+      scheduleViewerRedraw();
+    });
+  }
+  const chkBeamRowOv = $('chkBeamRowClusterOverlayVis');
+  if (chkBeamRowOv) {
+    try {
+      const s = localStorage.getItem('beamRowClusterOverlayVis');
+      if (s === '0') chkBeamRowOv.checked = false;
+    } catch (e) {}
+    showBeamRowClusterOverlays = !!chkBeamRowOv.checked;
+    chkBeamRowOv.addEventListener('change', () => {
+      showBeamRowClusterOverlays = !!chkBeamRowOv.checked;
+      try {
+        localStorage.setItem('beamRowClusterOverlayVis', chkBeamRowOv.checked ? '1' : '0');
+      } catch (e) {}
       scheduleViewerRedraw();
     });
   }
