@@ -12618,6 +12618,91 @@
     return out;
   }
 
+  /**
+   * flat 단면 1개에 대해 캔버스 `drawBeamFlatCircleOnlyOverlays`와 동일한 하단텍스트·치수텍스트·역할맵을 채운다.
+   * 부재별 표 등 redraw 없이 호출되는 경로가 뷰어와 같은 값을 쓰도록 공유한다.
+   */
+  function beamFlatFillSinglePlaneBelowTextLikeViewerDraw(pl, planeIndex, segments, markAnchorArr) {
+    if (!pl || !pl.centroid || !Number.isFinite(pl.centroid.x) || !Number.isFinite(pl.centroid.y)) return [];
+    const belowPack = beamFlatCollectTextsBelowSectionCenter(
+      pl.centroid.x,
+      pl.centroid.y,
+      pl.norm_bbox || pl.section_bbox || null,
+    );
+    const belowHits = (belowPack && belowPack.hits) || [];
+    const secNbPick = beamFlatNormSectionBBox(pl.norm_bbox || pl.section_bbox || null);
+    const mAncD = markAnchorArr && markAnchorArr[planeIndex];
+    const pickOptD = {};
+    if (secNbPick) pickOptD.nb = secNbPick;
+    if (mAncD && Number.isFinite(mAncD.x)) pickOptD.markAnchorX = mAncD.x;
+    if (mAncD && Number.isFinite(mAncD.y)) pickOptD.markAnchorY = mAncD.y;
+    let infoTargets = beamFlatPickInfoTextsFromBelowHits(
+      belowHits,
+      belowPack && belowPack.dir ? belowPack.dir : 'smallY',
+      Object.keys(pickOptD).length ? pickOptD : null,
+    );
+    let belowMode = 'role';
+    if (!infoTargets.length && belowHits.length) {
+      infoTargets = beamFlatFallbackBelowTextTargets(
+        belowHits,
+        5,
+        belowPack && belowPack.dir ? belowPack.dir : 'smallY',
+        { x: pl.centroid && pl.centroid.x, y: pl.centroid && pl.centroid.y },
+      );
+    }
+    const szHit = beamFlatPickSizeBxHFromBelowHits(belowHits);
+    if (szHit) {
+      const already = infoTargets.some(function (t) {
+        return t && String(t.role || '') === '크기';
+      });
+      if (!already) {
+        infoTargets.push({ role: '크기', hit: szHit, labelHit: null, fromLabel: false, source: 'size_fallback' });
+      }
+      if (belowMode === 'none') belowMode = 'role';
+    }
+    if (!infoTargets.length && belowHits.length) belowMode = 'none';
+    else if (!infoTargets.length) belowMode = 'none';
+    else if (infoTargets[0] && infoTargets[0].role === '하단텍스트') belowMode = 'chain';
+    pl.below_text_hit_count = belowHits.length;
+    pl.below_text_match_count = infoTargets.length;
+    pl.below_text_dir = belowPack && belowPack.dir ? belowPack.dir : '';
+    pl.below_text_mode = belowMode;
+    const dimHits = beamFlatCollectNearbyDimensionTexts(
+      pl.centroid && pl.centroid.x,
+      pl.centroid && pl.centroid.y,
+      pl.norm_bbox || pl.section_bbox || null,
+      segments,
+    );
+    pl.dim_text_matches = dimHits;
+    pl.dim_text_count = dimHits.length;
+    if (belowMode === 'role') {
+      pl.below_text_role_values = beamFlatRoleValueMapFromTargets(infoTargets);
+      pl.below_text_chain_values = [];
+    } else {
+      pl.below_text_role_values = {};
+      pl.below_text_chain_values = beamFlatChainValueListFromTargets(infoTargets);
+    }
+    beamFlatFinalizeBelowTextSkin(pl);
+    beamFlatFinalizeBelowTextSize(pl);
+    infoTargets = beamFlatSyncInfoTargetsAfterSkinFinalize(pl, infoTargets, belowMode);
+    pl.below_text_match_count = infoTargets.length;
+    pl.below_text_debug_targets = infoTargets.map(function (t) {
+      const h = t && t.hit ? t.hit : {};
+      return {
+        role: t && t.role ? String(t.role) : '',
+        source: t && t.source ? String(t.source) : '',
+        text: String(h.text || ''),
+        layer: String(h.layer || ''),
+        etype: String(h.etype || ''),
+        dimByObj: h.dimByObj === true,
+        dimByText: h.dimByText === true,
+        dy: Number.isFinite(Number(h.dy)) ? Number(h.dy) : null,
+        dx: Number.isFinite(Number(h.dx)) ? Number(h.dx) : null,
+      };
+    });
+    return infoTargets;
+  }
+
   /** 캔버스 redraw 이전에도 flat 단면 분석/하단텍스트 디버그를 강제 계산 */
   function beamFlatEnsureMergedSectionAnalysis(runB) {
     if (!runB || !previewData) return [];
@@ -12670,93 +12755,15 @@
     const mzAnchors = beamFlatMemberZoneTextAnchors(runB);
     const links = beamFlatNearestLowerSectionFromTextLinks(mzAnchors, planeAnalyses);
     const markAnchorByPlane = beamFlatMemberMarkAnchorBestByPlane(links);
-    for (let ai = 0; ai < planeAnalyses.length; ai++) {
-      const pl = planeAnalyses[ai];
-      if (!pl || !pl.centroid) continue;
-      const belowPack = beamFlatCollectTextsBelowSectionCenter(
-        pl.centroid.x,
-        pl.centroid.y,
-        pl.norm_bbox || pl.section_bbox || null,
-      );
-      const belowHits = (belowPack && belowPack.hits) || [];
-      const secNbPick = beamFlatNormSectionBBox(pl.norm_bbox || pl.section_bbox || null);
-      const mAnc = markAnchorByPlane[ai];
-      const pickOpt = {};
-      if (secNbPick) pickOpt.nb = secNbPick;
-      if (mAnc && Number.isFinite(mAnc.x)) pickOpt.markAnchorX = mAnc.x;
-      if (mAnc && Number.isFinite(mAnc.y)) pickOpt.markAnchorY = mAnc.y;
-      let infoTargets = beamFlatPickInfoTextsFromBelowHits(
-        belowHits,
-        belowPack && belowPack.dir ? belowPack.dir : 'smallY',
-        Object.keys(pickOpt).length ? pickOpt : null,
-      );
-      let belowMode = 'role';
-      if (!infoTargets.length && belowHits.length) {
-        infoTargets = beamFlatFallbackBelowTextTargets(
-          belowHits,
-          3,
-          belowPack && belowPack.dir ? belowPack.dir : 'smallY',
-          { x: pl.centroid && pl.centroid.x, y: pl.centroid && pl.centroid.y },
-        );
-      }
-      // 크기(B×H)는 라벨이 단면별 belowHits에 없을 수 있으므로 별도 fallback으로 합쳐준다.
-      const szHit = beamFlatPickSizeBxHFromBelowHits(belowHits);
-      if (szHit) {
-        const already = infoTargets.some(function (t) {
-          return t && String(t.role || '') === '크기';
-        });
-        if (!already) {
-          infoTargets.push({ role: '크기', hit: szHit, labelHit: null, fromLabel: false, source: 'size_fallback' });
-        }
-        if (belowMode === 'none') belowMode = 'role';
-      }
-      if (!infoTargets.length && belowHits.length) belowMode = 'none';
-      else if (!infoTargets.length) belowMode = 'none';
-      else if (infoTargets[0] && infoTargets[0].role === '하단텍스트') belowMode = 'chain';
-      pl.below_text_hit_count = belowHits.length;
-      pl.below_text_match_count = infoTargets.length;
-      pl.below_text_dir = belowPack && belowPack.dir ? belowPack.dir : '';
-      pl.below_text_mode = belowMode;
-      const dimHits = beamFlatCollectNearbyDimensionTexts(
-        pl.centroid && pl.centroid.x,
-        pl.centroid && pl.centroid.y,
-        pl.norm_bbox || pl.section_bbox || null,
-        segments,
-      );
-      pl.dim_text_matches = dimHits;
-      pl.dim_text_count = dimHits.length;
-      if (belowMode === 'role') {
-        pl.below_text_role_values = beamFlatRoleValueMapFromTargets(infoTargets);
-        pl.below_text_chain_values = [];
-      } else {
-        pl.below_text_role_values = {};
-        pl.below_text_chain_values = beamFlatChainValueListFromTargets(infoTargets);
-      }
-      pl.below_text_debug_targets = infoTargets.map(function (t) {
-        const h = t && t.hit ? t.hit : {};
-        return {
-          role: t && t.role ? String(t.role) : '',
-          source: t && t.source ? String(t.source) : '',
-          text: String(h.text || ''),
-          layer: String(h.layer || ''),
-          etype: String(h.etype || ''),
-          dimByObj: h.dimByObj === true,
-          dimByText: h.dimByText === true,
-          dy: Number.isFinite(Number(h.dy)) ? Number(h.dy) : null,
-          dx: Number.isFinite(Number(h.dx)) ? Number(h.dx) : null,
-        };
-      });
-    }
-    // 부재명·부위 텍스트는 link만 있으면 항상 주입(치수 파싱 실패와 무관)
-    // 부재표기치수(BxH)는 있을 때만(여러 링크면 가까운 링크 우선)
-    const seen = {};
+    // drawBeamFlatCircleOnlyOverlays 와 동일: 링크로 부재명·부위를 먼저 주입한 뒤 하단텍스트 역할맵을 채운다.
+    const seenLink = {};
     for (let i = 0; i < links.length; i++) {
       const lk = links[i];
       const ti = lk && lk.to != null ? Number(lk.to) : NaN;
       if (!Number.isFinite(ti) || ti < 0 || ti >= planeAnalyses.length) continue;
       const sc = (Number(lk.dy) || 0) + (Number(lk.dx) || 0) * 0.2;
-      if (seen[ti] != null && sc >= seen[ti]) continue;
-      seen[ti] = sc;
+      if (seenLink[ti] != null && sc >= seenLink[ti]) continue;
+      seenLink[ti] = sc;
       planeAnalyses[ti].member_mark_text = String(lk.memberText || '');
       planeAnalyses[ti].member_zone_text = String(lk.zoneText || '');
       const md = lk.memberMarkDims;
@@ -12764,11 +12771,14 @@
         planeAnalyses[ti].member_mark_dims = { width_mm: md.width_mm, depth_mm: md.depth_mm };
       }
     }
+    for (let ai = 0; ai < planeAnalyses.length; ai++) {
+      const pl = planeAnalyses[ai];
+      if (!pl || !pl.centroid) continue;
+      beamFlatFillSinglePlaneBelowTextLikeViewerDraw(pl, ai, segments, markAnchorByPlane);
+    }
     runB.beam_flat_center_links = links;
     runB.beam_flat_merged_section_analysis = planeAnalyses.filter(Boolean);
     (runB.beam_flat_merged_section_analysis || []).forEach(function (pl) {
-      beamFlatFinalizeBelowTextSkin(pl);
-      beamFlatFinalizeBelowTextSize(pl);
       const mode = String(pl.below_text_mode || '');
       const v = pl.below_text_role_values || {};
       const ch = pl.below_text_chain_values || [];
@@ -12993,83 +13003,8 @@
           ctx.stroke();
           ctx.restore();
 
-          // 단면 중심 -> 아래 실제 도면 텍스트(상부근/하부근/스트럽/표피철근) 연결
-          const belowPack = beamFlatCollectTextsBelowSectionCenter(
-            pl.centroid.x,
-            pl.centroid.y,
-            pl.norm_bbox || pl.section_bbox || null,
-          );
-          const belowHits = (belowPack && belowPack.hits) || [];
-          const secNbPick = beamFlatNormSectionBBox(pl.norm_bbox || pl.section_bbox || null);
-          const mAncD = markAnchorByPlaneDraw[ai];
-          const pickOptD = {};
-          if (secNbPick) pickOptD.nb = secNbPick;
-          if (mAncD && Number.isFinite(mAncD.x)) pickOptD.markAnchorX = mAncD.x;
-          if (mAncD && Number.isFinite(mAncD.y)) pickOptD.markAnchorY = mAncD.y;
-          let infoTargets = beamFlatPickInfoTextsFromBelowHits(
-            belowHits,
-            belowPack && belowPack.dir ? belowPack.dir : 'smallY',
-            Object.keys(pickOptD).length ? pickOptD : null,
-          );
-          let belowMode = 'role';
-          if (!infoTargets.length && belowHits.length) {
-            infoTargets = beamFlatFallbackBelowTextTargets(
-              belowHits,
-              5,
-              belowPack && belowPack.dir ? belowPack.dir : 'smallY',
-              { x: pl.centroid && pl.centroid.x, y: pl.centroid && pl.centroid.y },
-            );
-          }
-          const szHit = beamFlatPickSizeBxHFromBelowHits(belowHits);
-          if (szHit) {
-            const already = infoTargets.some(function (t) {
-              return t && String(t.role || '') === '크기';
-            });
-            if (!already) {
-              infoTargets.push({ role: '크기', hit: szHit, labelHit: null, fromLabel: false, source: 'size_fallback' });
-            }
-            if (belowMode === 'none') belowMode = 'role';
-          }
-          if (!infoTargets.length && belowHits.length) belowMode = 'none';
-          else if (!infoTargets.length) belowMode = 'none';
-          else if (infoTargets[0] && infoTargets[0].role === '하단텍스트') belowMode = 'chain';
-          pl.below_text_hit_count = belowHits.length;
-          pl.below_text_match_count = infoTargets.length;
-          pl.below_text_dir = belowPack && belowPack.dir ? belowPack.dir : '';
-          pl.below_text_mode = belowMode;
-          const dimHits = beamFlatCollectNearbyDimensionTexts(
-            pl.centroid && pl.centroid.x,
-            pl.centroid && pl.centroid.y,
-            pl.norm_bbox || pl.section_bbox || null,
-            segments,
-          );
-          pl.dim_text_matches = dimHits;
-          pl.dim_text_count = dimHits.length;
-          if (belowMode === 'role') {
-            pl.below_text_role_values = beamFlatRoleValueMapFromTargets(infoTargets);
-            pl.below_text_chain_values = [];
-          } else {
-            pl.below_text_role_values = {};
-            pl.below_text_chain_values = beamFlatChainValueListFromTargets(infoTargets);
-          }
-          beamFlatFinalizeBelowTextSkin(pl);
-          beamFlatFinalizeBelowTextSize(pl);
-          infoTargets = beamFlatSyncInfoTargetsAfterSkinFinalize(pl, infoTargets, belowMode);
-          pl.below_text_match_count = infoTargets.length;
-          pl.below_text_debug_targets = infoTargets.map(function (t) {
-            const h = t && t.hit ? t.hit : {};
-            return {
-              role: t && t.role ? String(t.role) : '',
-              source: t && t.source ? String(t.source) : '',
-              text: String(h.text || ''),
-              layer: String(h.layer || ''),
-              etype: String(h.etype || ''),
-              dimByObj: h.dimByObj === true,
-              dimByText: h.dimByText === true,
-              dy: Number.isFinite(Number(h.dy)) ? Number(h.dy) : null,
-              dx: Number.isFinite(Number(h.dx)) ? Number(h.dx) : null,
-            };
-          });
+          // 단면 중심 -> 아래 실제 도면 텍스트: beamFlatEnsureMergedSectionAnalysis / 부재별표와 동일 로직
+          const infoTargets = beamFlatFillSinglePlaneBelowTextLikeViewerDraw(pl, ai, segments, markAnchorByPlaneDraw) || [];
           if (infoTargets.length) {
             ctx.save();
             ctx.globalCompositeOperation = 'screen';
