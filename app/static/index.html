@@ -4948,17 +4948,6 @@
     return best || (arr.length === 1 ? arr[0] : null);
   }
 
-  /** `memberZoneLines` 항목의 zone(INT/CENTER/EXT/END/ALL) → 부재별표 3분할 칼럼용 키 */
-  function beamHorizontalRowZoneKeyFromMemberLine(run, rowIndex, labMap) {
-    const got = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
-    const raw = String((got && got.line && got.line.zone) || '').trim().toUpperCase();
-    if (raw === 'INT') return 'INT';
-    if (raw === 'CENTER' || raw === 'CEN') return 'CEN';
-    if (raw === 'EXT' || raw === 'END') return 'EXT';
-    if (raw === 'ALL') return 'ALL';
-    return '';
-  }
-
   function beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD) {
     if (!flatPl) return { w: fallbackW, d: fallbackD };
     const bucks = beamFlatExtractMmBucketsFromPlane(flatPl);
@@ -4983,27 +4972,57 @@
     return beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD);
   }
 
-  /** 단면에 주입된 부위 문자열(INT/CEN/EXT/ALL 등) → 표 3분할 키 (캔버스 보라 라벨 `member_zone_text` 와 동일 출처) */
-  function beamFlatMemberZoneDisplayKeyFromPlane(pl) {
-    const raw = String((pl && pl.member_zone_text) || '').trim().toUpperCase().replace(/\s+/g, '');
-    if (!raw) return '';
-    if (raw.indexOf('INT') >= 0) return 'INT';
-    if (raw.indexOf('CENTER') >= 0 || raw === 'CEN' || raw.indexOf('CEN') === 0) return 'CEN';
-    if (raw.indexOf('ALL') >= 0) return 'ALL';
-    if (raw.indexOf('EXT') >= 0 || raw.indexOf('EXTERIOR') >= 0) return 'EXT';
-    if (raw.indexOf('END') >= 0) return 'EXT';
+  /** `computeBeamHorizontalZoneMatches` 내부 zoneKey 와 동일 규칙(부위 라벨 텍스트 → INT/CENTER/ALL/EXT/END) */
+  function beamFlatZoneKeyFromClusterLabel(t) {
+    const s = String(t || '').toUpperCase().replace(/\s+/g, '');
+    if (!s) return '';
+    if (s.indexOf('INT') >= 0) return 'INT';
+    if (s.indexOf('CENTER') >= 0 || s === 'CEN' || s.indexOf('CEN') === 0) return 'CENTER';
+    if (s.indexOf('ALL') >= 0) return 'ALL';
+    if (s.indexOf('EXT') >= 0 || s.indexOf('EXTERIOR') >= 0) return 'EXT';
+    if (s.indexOf('END') >= 0) return 'END';
     return '';
   }
 
-  /** 캔버스 단면 라벨과 동일: 링크로 채워진 member_mark + member_zone (없으면 행 기준 Name) */
-  function beamFlatMemberTableNameForFlatRow(run, rowIndex, labMap, flatPl) {
-    const mm = String((flatPl && flatPl.member_mark_text) || '').trim();
-    const mz = String((flatPl && flatPl.member_zone_text) || '').trim();
-    if (mm || mz) {
-      const s = (mm + (mz ? ' ·' + mz : '')).trim();
-      if (s) return beamMemberTableDisplayMarkStripDims(s);
+  /** memberZoneLines 의 zone(INT/CENTER/EXT/END/ALL) → 부재별표 INT/CEN/EXT 칼럼 키 */
+  function beamFlatZoneKeyToMemberTableCols(zk) {
+    const u = String(zk == null ? '' : zk).trim().toUpperCase();
+    if (!u) return '';
+    if (u === 'INT') return 'INT';
+    if (u === 'CENTER' || u === 'CEN') return 'CEN';
+    if (u === 'ALL') return 'ALL';
+    if (u === 'EXT' || u === 'END') return 'EXT';
+    return '';
+  }
+
+  /** 단면 `member_zone_text` 만으로 부위 키(보조) */
+  function beamFlatMemberZoneDisplayKeyFromPlane(pl) {
+    return beamFlatZoneKeyToMemberTableCols(beamFlatZoneKeyFromClusterLabel((pl && pl.member_zone_text) || ''));
+  }
+
+  /**
+   * 부위 INT/CEN/EXT 분류: 행에 매칭된 memberZoneLines 의 line.zone 우선(캔버스와 동일),
+   * 없으면 단면 링크의 member_zone_text.
+   */
+  function beamFlatMemberTableZoneColsKeyFromRow(run, rowIndex, labMap, flatPl) {
+    const got = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
+    const lz = got && got.line && got.line.zone;
+    let t = beamFlatZoneKeyToMemberTableCols(lz);
+    if (!t && flatPl) {
+      t = beamFlatMemberZoneDisplayKeyFromPlane(flatPl);
     }
-    return beamCanvasMemberNameForMemberTable(run, rowIndex, labMap);
+    return t || 'ALL';
+  }
+
+  /** Name: 부재표기에서 치수 괄호 제거 후, 부위는 별도(마크에 섞이지 않게). */
+  function beamFlatMemberTableNameForFlatRow(run, rowIndex, labMap, flatPl) {
+    const mm0 = String((flatPl && flatPl.member_mark_text) || '').trim();
+    const mz0 = String((flatPl && flatPl.member_zone_text) || '').trim();
+    if (!mm0 && !mz0) return beamCanvasMemberNameForMemberTable(run, rowIndex, labMap);
+    const mm = beamMemberTableDisplayMarkStripDims(mm0);
+    const mz = beamMemberTableDisplayMarkStripDims(mz0);
+    if (mm && mz) return (mm + ' · ' + mz).trim();
+    return (mm || mz).trim();
   }
 
   /**
@@ -5116,7 +5135,6 @@
       const tStir = flatTx.stir || (isSrv ? '' : z(r.int_stirrup_bar));
       const tSkin = flatTx.skin || (isSrv ? '' : z(r.side_bar));
 
-      const rowPickZk = !isSrv ? beamHorizontalRowZoneKeyFromMemberLine(run, ri, labMap) : '';
       const mergedPlaneN = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis.length : 0;
       const usePlaneRebar = !isSrv && mergedPlaneN > 0;
 
@@ -5142,7 +5160,7 @@
         stExt = zKey === 'EXT' || zKey === 'ALL' ? tStir : '';
         sideCell = zKey ? tSkin : '';
       } else if (usePlaneRebar) {
-        const zk = beamFlatMemberZoneDisplayKeyFromPlane(flatPl) || rowPickZk || 'ALL';
+        const zk = beamFlatMemberTableZoneColsKeyFromRow(run, ri, labMap, flatPl);
         const hitInt = zk === 'INT' || zk === 'ALL';
         const hitCen = zk === 'CEN' || zk === 'ALL';
         const hitExt = zk === 'EXT' || zk === 'ALL';
@@ -6358,7 +6376,6 @@
           : beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX);
       const flatTx = beamFlatTextValuesFromPlane(flatPl);
       const resMm = beamFlatTableWidthDepthMmViewerFirst(flatPl, r.width_mm, r.depth_mm);
-      const rz = mergedPlaneN > 0 ? beamHorizontalRowZoneKeyFromMemberLine(fauxRun, ri, labMapX) : '';
       let cTopInt = '';
       let cTopCen = '';
       let cTopExt = '';
@@ -6370,7 +6387,7 @@
       let cStExt = '';
       let cSide = '';
       if (mergedPlaneN > 0) {
-        const zk = beamFlatMemberZoneDisplayKeyFromPlane(flatPl) || rz || 'ALL';
+        const zk = beamFlatMemberTableZoneColsKeyFromRow(fauxRun, ri, labMapX, flatPl);
         const hitInt = zk === 'INT' || zk === 'ALL';
         const hitCen = zk === 'CEN' || zk === 'ALL';
         const hitExt = zk === 'EXT' || zk === 'ALL';
