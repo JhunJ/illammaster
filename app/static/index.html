@@ -4860,14 +4860,59 @@
     };
   }
 
+  function beamFlatPlaneCentroidXY(pl) {
+    if (!pl) return null;
+    let cx = pl.centroid && Number(pl.centroid.x);
+    let cy = pl.centroid && Number(pl.centroid.y);
+    if (![cx, cy].every(Number.isFinite)) {
+      const bb = pl.norm_bbox || pl.section_bbox;
+      if (bb && bb.length === 4 && bb.every(function (q) { return Number.isFinite(Number(q)); })) {
+        cx = (Number(bb[0]) + Number(bb[2])) * 0.5;
+        cy = (Number(bb[1]) + Number(bb[3])) * 0.5;
+      }
+    }
+    if (![cx, cy].every(Number.isFinite)) return null;
+    return [cx, cy];
+  }
+
+  /** 부재별표: 부위 라인 끝점 없으면 스트립 X + 행 클러스터 Y 로 단면 후보와 거리 맞춤 */
+  function beamFlatAnchorXYForMemberTableRow(run, rowIndex, labMap) {
+    const got = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
+    if (got && got.line && got.line.to) {
+      const zx = Number(got.line.to.x);
+      const zy = Number(got.line.to.y);
+      if ([zx, zy].every(Number.isFinite)) return { x: zx, y: zy };
+    }
+    const info = beamHorizontalClusterIndexForRow(run, rowIndex);
+    const v = run && run.validation;
+    const rows = (run && run.rows) || [];
+    const r = rows[rowIndex];
+    if (!info || !v || !r) return null;
+    const yRef = Number.isFinite(info.yMean) ? info.yMean : Number(info.cluster && info.cluster.y_mean);
+    if (!Number.isFinite(yRef)) return null;
+    const sis = collectBeamVerticalStripIndicesForRow(r, v);
+    const strips = v.beam_vertical_strips || [];
+    let xc = NaN;
+    for (let si = 0; si < sis.length; si++) {
+      const st = strips[sis[si]];
+      if (st && Number.isFinite(Number(st.x_center))) {
+        xc = Number(st.x_center);
+        break;
+      }
+    }
+    if (!Number.isFinite(xc)) return null;
+    return { x: xc, y: yRef };
+  }
+
   function beamFlatAnalysisForExtractRow(run, rowIndex, labMap) {
     const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
     if (!arr.length) return null;
-    const p = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
-    if (!p || !p.line || !p.line.to) return null;
-    const zx = Number(p.line.to.x);
-    const zy = Number(p.line.to.y);
-    if (![zx, zy].every(Number.isFinite)) return null;
+    const anchor = beamFlatAnchorXYForMemberTableRow(run, rowIndex, labMap);
+    const zx = anchor && Number(anchor.x);
+    const zy = anchor && Number(anchor.y);
+    if (![zx, zy].every(Number.isFinite)) {
+      return arr[0] || null;
+    }
     const links = Array.isArray(run.beam_flat_center_links) ? run.beam_flat_center_links : [];
     let best = null;
     let bestS = Infinity;
@@ -4886,7 +4931,21 @@
         best = arr[ti];
       }
     }
-    return best;
+    if (!best) {
+      for (let ai = 0; ai < arr.length; ai++) {
+        const pl = arr[ai];
+        const c = beamFlatPlaneCentroidXY(pl);
+        if (!c) continue;
+        const dx = Math.abs(c[0] - zx);
+        const dy = Math.abs(c[1] - zy);
+        const s = dy + dx * 0.2;
+        if (s < bestS) {
+          bestS = s;
+          best = pl;
+        }
+      }
+    }
+    return best || (arr.length === 1 ? arr[0] : null);
   }
 
   /** `memberZoneLines` 항목의 zone(INT/CENTER/EXT/END/ALL) → 부재별표 3분할 칼럼용 키 */
@@ -4935,6 +4994,13 @@
     dbgLines.push('serverFlatRows: ' + serverFlatRows.length);
     dbgLines.push('beamMemberTableUseServerFlatRows: ' + !!beamMemberTableUseServerFlatRows);
     dbgLines.push('beam_flat_picked: ' + (Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked.length : 0));
+    dbgLines.push(
+      'beam_flat_merged_section_analysis: ' +
+        (Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis.length : 0),
+    );
+    dbgLines.push(
+      'beam_flat_center_links: ' + (Array.isArray(run.beam_flat_center_links) ? run.beam_flat_center_links.length : 0),
+    );
 
     function beamFlatFmtMmPair(m) {
       if (!m || !Number.isFinite(Number(m.width_mm)) || !Number.isFinite(Number(m.depth_mm))) return '';
@@ -5018,7 +5084,8 @@
       const tSkin = flatTx.skin || (isSrv ? '' : z(r.side_bar));
 
       const rowPickZk = !isSrv ? beamHorizontalRowZoneKeyFromMemberLine(run, ri, labMap) : '';
-      const usePlaneRebar = !isSrv && !!flatPl;
+      const mergedPlaneN = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis.length : 0;
+      const usePlaneRebar = !isSrv && mergedPlaneN > 0;
 
       let topInt;
       let topCen;
@@ -6243,10 +6310,13 @@
       const z = (x) => (x != null && x !== '' ? x : '');
       const zb = (key, val) => formatBeamExtractDisplay(key, val);
       const nm = beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX);
+      const mergedPlaneN = Array.isArray(fauxRun.beam_flat_merged_section_analysis)
+        ? fauxRun.beam_flat_merged_section_analysis.length
+        : 0;
       const flatPl = beamFlatAnalysisForExtractRow(fauxRun, ri, labMapX);
       const flatTx = beamFlatTextValuesFromPlane(flatPl);
       const resMm = beamFlatResolveTableWidthDepthMm(flatPl, r.width_mm, r.depth_mm);
-      const rz = flatPl ? beamHorizontalRowZoneKeyFromMemberLine(fauxRun, ri, labMapX) : '';
+      const rz = mergedPlaneN > 0 ? beamHorizontalRowZoneKeyFromMemberLine(fauxRun, ri, labMapX) : '';
       let cTopInt = '';
       let cTopCen = '';
       let cTopExt = '';
@@ -6257,7 +6327,7 @@
       let cStCen = '';
       let cStExt = '';
       let cSide = '';
-      if (flatPl) {
+      if (mergedPlaneN > 0) {
         const zk = rz || 'ALL';
         const hitInt = zk === 'INT' || zk === 'ALL';
         const hitCen = zk === 'CEN' || zk === 'ALL';
