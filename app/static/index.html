@@ -4839,9 +4839,69 @@
   }
 
   /**
+   * false면 부재별 표·엑셀 보_부재는 서버 beam_flat_member_table_rows를 쓰지 않고
+   * 캔버스와 동일한 프론트 단면(beam_flat_merged_section_analysis) 기준으로 맞춘다.
+   */
+  var beamMemberTableUseServerFlatRows = false;
+
+  function beamFlatTextValuesFromPlane(pl) {
+    const rv = (pl && pl.below_text_role_values) || {};
+    const chain = Array.isArray(pl && pl.below_text_chain_values) ? pl.below_text_chain_values : [];
+    let skinStr = String(rv['표피철근'] || '').trim();
+    if (!skinStr && chain.length >= 4) {
+      const c3 = String(chain[3] || '').trim();
+      if (c3 && !beamFlatLooksLikeMemberMarkText(c3) && beamFlatLooksLikeRebarValueText(c3)) skinStr = c3;
+    }
+    return {
+      top: String(rv['상부근'] || chain[0] || '').trim(),
+      bot: String(rv['하부근'] || chain[1] || '').trim(),
+      stir: String(rv['스트럽'] || chain[2] || '').trim(),
+      skin: skinStr,
+    };
+  }
+
+  function beamFlatAnalysisForExtractRow(run, rowIndex, labMap) {
+    const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
+    if (!arr.length) return null;
+    const p = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
+    if (!p || !p.line || !p.line.to) return null;
+    const zx = Number(p.line.to.x);
+    const zy = Number(p.line.to.y);
+    if (![zx, zy].every(Number.isFinite)) return null;
+    const links = Array.isArray(run.beam_flat_center_links) ? run.beam_flat_center_links : [];
+    let best = null;
+    let bestS = Infinity;
+    for (let i = 0; i < links.length; i++) {
+      const lk = links[i];
+      const fx = Number(lk && lk.fromX);
+      const fy = Number(lk && lk.fromY);
+      const ti = lk && lk.to != null ? Number(lk.to) : NaN;
+      if (![fx, fy, ti].every(Number.isFinite)) continue;
+      if (ti < 0 || ti >= arr.length) continue;
+      const dx = Math.abs(fx - zx);
+      const dy = Math.abs(fy - zy);
+      const s = dy + dx * 0.2;
+      if (s < bestS) {
+        bestS = s;
+        best = arr[ti];
+      }
+    }
+    return best;
+  }
+
+  function beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD) {
+    if (!flatPl) return { w: fallbackW, d: fallbackD };
+    const bucks = beamFlatExtractMmBucketsFromPlane(flatPl);
+    const r0 = beamFlatResolveMmFromBuckets(bucks, beamFlatGetMmPrimaryPreference());
+    if (r0.mm && Number.isFinite(r0.mm.width_mm) && Number.isFinite(r0.mm.depth_mm))
+      return { w: r0.mm.width_mm, d: r0.mm.depth_mm };
+    return { w: fallbackW, d: fallbackD };
+  }
+
+  /**
    * 우측「부재별 표」(보·가로 Y묶음).
-   * 1순위: 서버 `validation.beam_flat_member_table_rows`(flat 단면·슬랩·하단텍스트).
-   * 보조: 브라우저 `beam_flat_merged_section_analysis`·픽된 연결선.
+   * 서버는 beam_flat_member_table_rows 등을 내려줄 수 있으나, 기본은 프론트 단면·연결선과 동일 출처.
+   * beamMemberTableUseServerFlatRows === true 일 때만 서버 flat 슬랩 병합 표를 사용한다.
    */
   function renderBeamHorizontalMemberTableHtml(run) {
     const v = run.validation || {};
@@ -4851,6 +4911,9 @@
     const labMap = buildPreviewLabelEidMap();
     const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
     try {
+      beamFlatEnsureMergedSectionAnalysis(run);
+    } catch (e) {}
+    try {
       (Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : []).forEach(function (pl) {
         beamFlatFinalizeBelowTextSize(pl);
       });
@@ -4859,63 +4922,12 @@
     const dimMismatchRows = [];
     dbgLines.push('=== 부재별표(보·가로 Y묶음) 디버그 ===');
     dbgLines.push('serverFlatRows: ' + serverFlatRows.length);
+    dbgLines.push('beamMemberTableUseServerFlatRows: ' + !!beamMemberTableUseServerFlatRows);
     dbgLines.push('beam_flat_picked: ' + (Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked.length : 0));
 
-    function beamFlatAnalysisForRow(rowIndex) {
-      const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
-      if (!arr.length) return null;
-      const p = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
-      if (!p || !p.line || !p.line.to) return null;
-      const zx = Number(p.line.to.x);
-      const zy = Number(p.line.to.y);
-      if (![zx, zy].every(Number.isFinite)) return null;
-      const links = Array.isArray(run.beam_flat_center_links) ? run.beam_flat_center_links : [];
-      let best = null;
-      let bestS = Infinity;
-      for (let i = 0; i < links.length; i++) {
-        const lk = links[i];
-        const fx = Number(lk && lk.fromX);
-        const fy = Number(lk && lk.fromY);
-        const ti = lk && lk.to != null ? Number(lk.to) : NaN;
-        if (![fx, fy, ti].every(Number.isFinite)) continue;
-        if (ti < 0 || ti >= arr.length) continue;
-        const dx = Math.abs(fx - zx);
-        const dy = Math.abs(fy - zy);
-        const s = dy + dx * 0.2;
-        if (s < bestS) {
-          bestS = s;
-          best = arr[ti];
-        }
-      }
-      return best;
-    }
-
-    function beamFlatTextValuesForRow(pl) {
-      const rv = (pl && pl.below_text_role_values) || {};
-      const chain = Array.isArray(pl && pl.below_text_chain_values) ? pl.below_text_chain_values : [];
-      let skinStr = String(rv['표피철근'] || '').trim();
-      if (!skinStr && chain.length >= 4) {
-        const c3 = String(chain[3] || '').trim();
-        if (c3 && !beamFlatLooksLikeMemberMarkText(c3) && beamFlatLooksLikeRebarValueText(c3)) skinStr = c3;
-      }
-      return {
-        top: String(rv['상부근'] || chain[0] || '').trim(),
-        bot: String(rv['하부근'] || chain[1] || '').trim(),
-        stir: String(rv['스트럽'] || chain[2] || '').trim(),
-        skin: skinStr,
-      };
-    }
     function beamFlatFmtMmPair(m) {
       if (!m || !Number.isFinite(Number(m.width_mm)) || !Number.isFinite(Number(m.depth_mm))) return '';
       return String(Math.round(Number(m.width_mm))) + '×' + String(Math.round(Number(m.depth_mm)));
-    }
-    function beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD) {
-      if (!flatPl) return { w: fallbackW, d: fallbackD };
-      const bucks = beamFlatExtractMmBucketsFromPlane(flatPl);
-      const r0 = beamFlatResolveMmFromBuckets(bucks, beamFlatGetMmPrimaryPreference());
-      if (r0.mm && Number.isFinite(r0.mm.width_mm) && Number.isFinite(r0.mm.depth_mm))
-        return { w: r0.mm.width_mm, d: r0.mm.depth_mm };
-      return { w: fallbackW, d: fallbackD };
     }
     const th = [
       '#',
@@ -4936,13 +4948,20 @@
       'Side Bar',
       'Strip X',
     ];
+    const useSrvFlatTable = !!(serverFlatRows.length && beamMemberTableUseServerFlatRows);
     let html = '';
-    if (serverFlatRows.length) {
+    if (useSrvFlatTable) {
       html +=
         '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">부재별 표는 서버 <strong>flat 단일 경로</strong> 결과(<code>beam_flat_member_table_rows</code>)를 우선합니다. 행 클릭 시 원본 추출 행(<code>source_row_index</code>)으로 이동합니다.</p>';
     } else {
       html +=
-        '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">Name·행 클릭: <strong>단면 박스 라벨</strong>(부재명·부위·존) 및 가로 연결선과 동일 출처(<code>getCachedBeamHorizontalMatch</code> → <code>picked</code>).</p>';
+        '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">부재별 표: <strong>프론트 단면</strong>(<code>beam_flat_merged_section_analysis</code>·중심연결)과 추출 행을 1:1로 표시합니다. Width·Depth는 단면에서 우선순위 반영. Name·행 클릭은 <code>getCachedBeamHorizontalMatch</code>·<code>picked</code>와 동일 출처입니다.' +
+        (serverFlatRows.length
+          ? ' <span style="color:#57606a">(서버 <code>beam_flat_member_table_rows</code>는 ' +
+            serverFlatRows.length +
+            '행 있으나 표 본문에는 사용하지 않습니다.)</span>'
+          : '') +
+        '</p>';
     }
     html += '<div class="extract-result-table-wrap"><table class="extract-grid extract-member-tidy"><thead><tr>';
     th.forEach((t) => {
@@ -4957,8 +4976,8 @@
       const sx = opts.sx != null ? String(opts.sx) : formatBeamMergedStripXs(r, strips);
       const z = (x) => (x != null && x !== '' ? String(x) : '');
       const zb = (key, val) => escapeHtml(formatBeamExtractDisplay(key, val));
-      const flatPl = beamFlatAnalysisForRow(ri);
-      const flatTxBr = beamFlatTextValuesForRow(flatPl);
+      const flatPl = beamFlatAnalysisForExtractRow(run, ri, labMap);
+      const flatTxBr = beamFlatTextValuesFromPlane(flatPl);
       const flatTx = {
         top: String(opts.flatTxSrv.top || flatTxBr.top || '').trim(),
         bot: String(opts.flatTxSrv.bot || flatTxBr.bot || '').trim(),
@@ -5026,7 +5045,7 @@
       return h;
     }
 
-    if (serverFlatRows.length) {
+    if (useSrvFlatTable) {
       // 서버 flat 슬랩행(부위별)을 "부재명 1행"으로 병합한다.
       const picked = Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked : [];
       const secByMark = {};
@@ -5166,7 +5185,7 @@
           below_text_role_values: fr && fr.below_text_role_values,
           below_text_chain_values: fr && fr.below_text_chain_values,
         };
-        let tx = beamFlatTextValuesForRow(srvPl);
+        let tx = beamFlatTextValuesFromPlane(srvPl);
         const txFromServer = !!(tx.top || tx.bot || tx.stir || tx.skin);
         // 서버값이 비면, 화면에서 이미 읽힌 단면 텍스트(pl.below_text_role_values)로 보강
         if (!(tx.top || tx.bot || tx.stir || tx.skin)) {
@@ -5638,8 +5657,8 @@
     } else {
       rows.forEach((r, ri) => {
         const nameCell = beamCanvasMemberNameForMemberTable(run, ri, labMap);
-        const flatPl = beamFlatAnalysisForRow(ri);
-        const flatTxSrv = beamFlatTextValuesForRow(flatPl);
+        const flatPl = beamFlatAnalysisForExtractRow(run, ri, labMap);
+        const flatTxSrv = beamFlatTextValuesFromPlane(flatPl);
         html += oneRowHtml({
           ri: ri,
           rowNum: ri + 1,
@@ -5879,10 +5898,23 @@
     return aoa;
   }
 
-  function buildBeamVerticalTidyAoa(rows, validation) {
+  function buildBeamVerticalTidyAoa(rows, validation, runOpt) {
     const v = validation || {};
     const strips = v.beam_vertical_strips || [];
     const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
+    const runB =
+      runOpt && typeof runOpt === 'object'
+        ? runOpt
+        : typeof lastRunByCategory !== 'undefined' && lastRunByCategory.beam
+          ? lastRunByCategory.beam
+          : null;
+    const fauxRun = {
+      rows: rows,
+      validation: v,
+      beam_flat_merged_section_analysis:
+        runB && Array.isArray(runB.beam_flat_merged_section_analysis) ? runB.beam_flat_merged_section_analysis : [],
+      beam_flat_center_links: runB && Array.isArray(runB.beam_flat_center_links) ? runB.beam_flat_center_links : [],
+    };
     const h = [
       '#',
       'Name',
@@ -5903,7 +5935,6 @@
       'Strip_X',
     ];
     const aoa = [h];
-    const fauxRun = { rows: rows, validation: v };
     function beamFlatTextFromServerRow(fr) {
       const rv = (fr && fr.below_text_role_values) || {};
       const chain = Array.isArray(fr && fr.below_text_chain_values) ? fr.below_text_chain_values : [];
@@ -5924,7 +5955,7 @@
       };
     }
 
-    if (serverFlatRows.length) {
+    if (serverFlatRows.length && beamMemberTableUseServerFlatRows) {
       function normZoneKey(z) {
         const u = String(z || '').trim().toUpperCase();
         if (u === 'INT') return 'INT';
@@ -6158,18 +6189,21 @@
       return aoa;
     }
 
+    const labMapX = buildPreviewLabelEidMap();
     rows.forEach((r, ri) => {
       const sx = formatBeamMergedStripXs(r, strips);
       const z = (x) => (x != null && x !== '' ? x : '');
       const zb = (key, val) => formatBeamExtractDisplay(key, val);
-      const nm = beamCanvasMemberNameForMemberTable(fauxRun, ri);
+      const nm = beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX);
+      const flatPl = beamFlatAnalysisForExtractRow(fauxRun, ri, labMapX);
+      const resMm = beamFlatResolveTableWidthDepthMm(flatPl, r.width_mm, r.depth_mm);
       aoa.push([
         ri + 1,
         nm,
         z(r.type),
         z(r.material),
-        z(r.width_mm),
-        z(r.depth_mm),
+        z(resMm.w),
+        z(resMm.d),
         zb('int_top_bar', r.int_top_bar),
         zb('cen_top_bar', r.cen_top_bar),
         zb('ext_top_bar', r.ext_top_bar),
@@ -6965,13 +6999,20 @@
         Array.isArray(v.beam_row_clusters) &&
         v.beam_row_clusters.length
       ) {
-        /* 가로 Y묶음(번들·flat 공통): 서버 flat 단면 + beam_flat_member_table_rows 기준 표 */
+        /* 가로 Y묶음: 부재별 표는 기본 프론트 단면(beam_flat_merged_section_analysis)과 동일 */
         mb.style.display = 'block';
         const pack = renderBeamHorizontalMemberTableHtml(run);
         mh.innerHTML = pack.html;
         const v0 = run.validation || {};
-        const hasFlat = Array.isArray(v0.beam_flat_member_table_rows) && v0.beam_flat_member_table_rows.length;
-        if (hasFlat) beamFlatRenderDimMismatchTable(pack.dimMismatchRows || []);
+        const dimMr = pack.dimMismatchRows || [];
+        if (dimMr.length) beamFlatRenderDimMismatchTable(dimMr);
+        else if (!beamMemberTableUseServerFlatRows)
+          beamFlatRenderDimMismatchTable([], {
+            emptyHint:
+              '부재별 표는 프론트 단면 분석과 동일합니다. 서버에 flat 부재별 행이 있어도 표 본문에는 쓰지 않습니다. Width·Depth 우선 순위는 표에 적용됩니다.',
+          });
+        else if (Array.isArray(v0.beam_flat_member_table_rows) && v0.beam_flat_member_table_rows.length)
+          beamFlatRenderDimMismatchTable([]);
         else
           beamFlatRenderDimMismatchTable([], {
             emptyHint: 'flat 부재별 서버 행이 없으면 세 원천 비교 목록만 생략됩니다. Width·Depth 우선 순위 선택은 표에 적용됩니다.',
@@ -16458,7 +16499,7 @@
         new Date().toISOString().slice(0, 10) +
         '.csv';
     } else if (vbb) {
-      const aoa = buildBeamVerticalTidyAoa(rows, lastRun.validation);
+      const aoa = buildBeamVerticalTidyAoa(rows, lastRun.validation, lastRun);
       text = aoa.map((line) => line.map(csvEscapeCell).join(',')).join('\n');
       fname =
         'illam_extract_' +
@@ -16591,7 +16632,7 @@
     } else if (vbb) {
       // 화면의 부재별표와 엑셀 '보_부재'를 1:1 동일하게 만들기 위해,
       // 이미 렌더된 표가 있으면 DOM을 그대로 AOA로 추출해 사용한다.
-      const tidyAoa = aoaFromRenderedMemberTable() || buildBeamVerticalTidyAoa(rows, lastRun.validation);
+      const tidyAoa = aoaFromRenderedMemberTable() || buildBeamVerticalTidyAoa(rows, lastRun.validation, lastRun);
       const wsTidy = XLSX.utils.aoa_to_sheet(tidyAoa);
       const tw = tidyAoa[0] ? tidyAoa[0].length : 1;
       const tcolW = [];
@@ -16608,15 +16649,18 @@
       wsTidy['!cols'] = tcolW;
       XLSX.utils.book_append_sheet(wb, wsTidy, '보_부재');
     }
-    /* 보(flat) 서버 부재별표는 세로블록 여부와 무관하게 엑셀에 포함 */
+    /* 보 가로 Y묶음: 부재별 표가 있을 때 엑셀 보_부재 포함(프론트 단면 기준일 때는 서버 flat 행 유무와 무관) */
+    const beamHzClusters =
+      catX === 'beam' &&
+      Array.isArray(v.beam_row_clusters) &&
+      v.beam_row_clusters.length;
     if (
       catX === 'beam' &&
       !vb &&
       !vbb &&
-      Array.isArray(v.beam_flat_member_table_rows) &&
-      v.beam_flat_member_table_rows.length
+      (beamHzClusters || (beamMemberTableUseServerFlatRows && Array.isArray(v.beam_flat_member_table_rows) && v.beam_flat_member_table_rows.length))
     ) {
-      const tidyAoa = aoaFromRenderedMemberTable() || buildBeamVerticalTidyAoa(rows, lastRun.validation);
+      const tidyAoa = aoaFromRenderedMemberTable() || buildBeamVerticalTidyAoa(rows, lastRun.validation, lastRun);
       const wsTidy = XLSX.utils.aoa_to_sheet(tidyAoa);
       const tw = tidyAoa[0] ? tidyAoa[0].length : 1;
       const tcolW = [];
