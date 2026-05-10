@@ -4889,6 +4889,17 @@
     return best;
   }
 
+  /** `memberZoneLines` 항목의 zone(INT/CENTER/EXT/END/ALL) → 부재별표 3분할 칼럼용 키 */
+  function beamHorizontalRowZoneKeyFromMemberLine(run, rowIndex, labMap) {
+    const got = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
+    const raw = String((got && got.line && got.line.zone) || '').trim().toUpperCase();
+    if (raw === 'INT') return 'INT';
+    if (raw === 'CENTER' || raw === 'CEN') return 'CEN';
+    if (raw === 'EXT' || raw === 'END') return 'EXT';
+    if (raw === 'ALL') return 'ALL';
+    return '';
+  }
+
   function beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD) {
     if (!flatPl) return { w: fallbackW, d: fallbackD };
     const bucks = beamFlatExtractMmBucketsFromPlane(flatPl);
@@ -5006,20 +5017,57 @@
       const tStir = flatTx.stir || (isSrv ? '' : z(r.int_stirrup_bar));
       const tSkin = flatTx.skin || (isSrv ? '' : z(r.side_bar));
 
-      const topInt = !isSrv ? z(r.int_top_bar) : zKey === 'INT' || zKey === 'ALL' ? tTop : '';
-      const topCen = !isSrv ? zb('cen_top_bar', r.cen_top_bar) : zKey === 'CEN' || zKey === 'ALL' ? tTop : '';
-      const topExt = !isSrv ? zb('ext_top_bar', r.ext_top_bar) : zKey === 'EXT' || zKey === 'ALL' ? tTop : '';
+      const rowPickZk = !isSrv ? beamHorizontalRowZoneKeyFromMemberLine(run, ri, labMap) : '';
+      const usePlaneRebar = !isSrv && !!flatPl;
 
-      const botInt = !isSrv ? z(r.int_bot_bar) : zKey === 'INT' || zKey === 'ALL' ? tBot : '';
-      const botCen = !isSrv ? zb('cen_bot_bar', r.cen_bot_bar) : zKey === 'CEN' || zKey === 'ALL' ? tBot : '';
-      const botExt = !isSrv ? zb('ext_bot_bar', r.ext_bot_bar) : zKey === 'EXT' || zKey === 'ALL' ? tBot : '';
-
-      const stInt = !isSrv ? z(r.int_stirrup_bar) : zKey === 'INT' || zKey === 'ALL' ? tStir : '';
-      const stCen = !isSrv ? zb('cen_stirrup_bar', r.cen_stirrup_bar) : zKey === 'CEN' || zKey === 'ALL' ? tStir : '';
-      const stExt = !isSrv ? zb('ext_stirrup_bar', r.ext_stirrup_bar) : zKey === 'EXT' || zKey === 'ALL' ? tStir : '';
-
-      // 표의 'Side Bar'는 부위별로 따로 칼럼이 없어서, 해당 부위 행에만 표시(ALL이면 모든 행 동일)
-      const sideCell = isSrv ? (zKey ? tSkin : '') : (tSkin || z(r.side_bar));
+      let topInt;
+      let topCen;
+      let topExt;
+      let botInt;
+      let botCen;
+      let botExt;
+      let stInt;
+      let stCen;
+      let stExt;
+      let sideCell;
+      if (isSrv) {
+        topInt = zKey === 'INT' || zKey === 'ALL' ? tTop : '';
+        topCen = zKey === 'CEN' || zKey === 'ALL' ? tTop : '';
+        topExt = zKey === 'EXT' || zKey === 'ALL' ? tTop : '';
+        botInt = zKey === 'INT' || zKey === 'ALL' ? tBot : '';
+        botCen = zKey === 'CEN' || zKey === 'ALL' ? tBot : '';
+        botExt = zKey === 'EXT' || zKey === 'ALL' ? tBot : '';
+        stInt = zKey === 'INT' || zKey === 'ALL' ? tStir : '';
+        stCen = zKey === 'CEN' || zKey === 'ALL' ? tStir : '';
+        stExt = zKey === 'EXT' || zKey === 'ALL' ? tStir : '';
+        sideCell = zKey ? tSkin : '';
+      } else if (usePlaneRebar) {
+        const zk = rowPickZk || 'ALL';
+        const hitInt = zk === 'INT' || zk === 'ALL';
+        const hitCen = zk === 'CEN' || zk === 'ALL';
+        const hitExt = zk === 'EXT' || zk === 'ALL';
+        topInt = hitInt ? zb('int_top_bar', flatTx.top) : '';
+        topCen = hitCen ? zb('cen_top_bar', flatTx.top) : '';
+        topExt = hitExt ? zb('ext_top_bar', flatTx.top) : '';
+        botInt = hitInt ? zb('int_bot_bar', flatTx.bot) : '';
+        botCen = hitCen ? zb('cen_bot_bar', flatTx.bot) : '';
+        botExt = hitExt ? zb('ext_bot_bar', flatTx.bot) : '';
+        stInt = hitInt ? zb('int_stirrup_bar', flatTx.stir) : '';
+        stCen = hitCen ? zb('cen_stirrup_bar', flatTx.stir) : '';
+        stExt = hitExt ? zb('ext_stirrup_bar', flatTx.stir) : '';
+        sideCell = hitInt || hitCen || hitExt ? zb('side_bar', flatTx.skin) : '';
+      } else {
+        topInt = z(r.int_top_bar);
+        topCen = zb('cen_top_bar', r.cen_top_bar);
+        topExt = zb('ext_top_bar', r.ext_top_bar);
+        botInt = z(r.int_bot_bar);
+        botCen = zb('cen_bot_bar', r.cen_bot_bar);
+        botExt = zb('ext_bot_bar', r.ext_bot_bar);
+        stInt = z(r.int_stirrup_bar);
+        stCen = zb('cen_stirrup_bar', r.cen_stirrup_bar);
+        stExt = zb('ext_stirrup_bar', r.ext_stirrup_bar);
+        sideCell = tSkin || z(r.side_bar);
+      }
       const nameCell = opts.nameCell;
       const rowNum = opts.rowNum;
       let h = '';
@@ -6196,7 +6244,46 @@
       const zb = (key, val) => formatBeamExtractDisplay(key, val);
       const nm = beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX);
       const flatPl = beamFlatAnalysisForExtractRow(fauxRun, ri, labMapX);
+      const flatTx = beamFlatTextValuesFromPlane(flatPl);
       const resMm = beamFlatResolveTableWidthDepthMm(flatPl, r.width_mm, r.depth_mm);
+      const rz = flatPl ? beamHorizontalRowZoneKeyFromMemberLine(fauxRun, ri, labMapX) : '';
+      let cTopInt = '';
+      let cTopCen = '';
+      let cTopExt = '';
+      let cBotInt = '';
+      let cBotCen = '';
+      let cBotExt = '';
+      let cStInt = '';
+      let cStCen = '';
+      let cStExt = '';
+      let cSide = '';
+      if (flatPl) {
+        const zk = rz || 'ALL';
+        const hitInt = zk === 'INT' || zk === 'ALL';
+        const hitCen = zk === 'CEN' || zk === 'ALL';
+        const hitExt = zk === 'EXT' || zk === 'ALL';
+        cTopInt = hitInt ? zb('int_top_bar', flatTx.top) : '';
+        cTopCen = hitCen ? zb('cen_top_bar', flatTx.top) : '';
+        cTopExt = hitExt ? zb('ext_top_bar', flatTx.top) : '';
+        cBotInt = hitInt ? zb('int_bot_bar', flatTx.bot) : '';
+        cBotCen = hitCen ? zb('cen_bot_bar', flatTx.bot) : '';
+        cBotExt = hitExt ? zb('ext_bot_bar', flatTx.bot) : '';
+        cStInt = hitInt ? zb('int_stirrup_bar', flatTx.stir) : '';
+        cStCen = hitCen ? zb('cen_stirrup_bar', flatTx.stir) : '';
+        cStExt = hitExt ? zb('ext_stirrup_bar', flatTx.stir) : '';
+        cSide = hitInt || hitCen || hitExt ? zb('side_bar', flatTx.skin) : '';
+      } else {
+        cTopInt = zb('int_top_bar', r.int_top_bar);
+        cTopCen = zb('cen_top_bar', r.cen_top_bar);
+        cTopExt = zb('ext_top_bar', r.ext_top_bar);
+        cBotInt = zb('int_bot_bar', r.int_bot_bar);
+        cBotCen = zb('cen_bot_bar', r.cen_bot_bar);
+        cBotExt = zb('ext_bot_bar', r.ext_bot_bar);
+        cStInt = zb('int_stirrup_bar', r.int_stirrup_bar);
+        cStCen = zb('cen_stirrup_bar', r.cen_stirrup_bar);
+        cStExt = zb('ext_stirrup_bar', r.ext_stirrup_bar);
+        cSide = zb('side_bar', r.side_bar);
+      }
       aoa.push([
         ri + 1,
         nm,
@@ -6204,16 +6291,16 @@
         z(r.material),
         z(resMm.w),
         z(resMm.d),
-        zb('int_top_bar', r.int_top_bar),
-        zb('cen_top_bar', r.cen_top_bar),
-        zb('ext_top_bar', r.ext_top_bar),
-        zb('int_bot_bar', r.int_bot_bar),
-        zb('cen_bot_bar', r.cen_bot_bar),
-        zb('ext_bot_bar', r.ext_bot_bar),
-        zb('int_stirrup_bar', r.int_stirrup_bar),
-        zb('cen_stirrup_bar', r.cen_stirrup_bar),
-        zb('ext_stirrup_bar', r.ext_stirrup_bar),
-        zb('side_bar', r.side_bar),
+        cTopInt,
+        cTopCen,
+        cTopExt,
+        cBotInt,
+        cBotCen,
+        cBotExt,
+        cStInt,
+        cStCen,
+        cStExt,
+        cSide,
         sx,
       ]);
     });
