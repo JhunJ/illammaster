@@ -4968,6 +4968,44 @@
     return { w: fallbackW, d: fallbackD };
   }
 
+  /** 오버레이 `beamFlatMergedSectionOverlayLabelLines`와 동일 우선: 부재표기치수 → 텍스트 크기 → 기존 버킷 */
+  function beamFlatTableWidthDepthMmViewerFirst(flatPl, fallbackW, fallbackD) {
+    if (!flatPl) return { w: fallbackW, d: fallbackD };
+    const md = flatPl.member_mark_dims;
+    if (md && Number.isFinite(Number(md.width_mm)) && Number.isFinite(Number(md.depth_mm))) {
+      return { w: Number(md.width_mm), d: Number(md.depth_mm) };
+    }
+    const rv = flatPl.below_text_role_values || {};
+    const parsed = beamFlatParseBxHNumsFromString(rv['크기'] != null ? String(rv['크기']) : '');
+    if (parsed && Number.isFinite(parsed.width_mm) && Number.isFinite(parsed.depth_mm)) {
+      return { w: parsed.width_mm, d: parsed.depth_mm };
+    }
+    return beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD);
+  }
+
+  /** 단면에 주입된 부위 문자열(INT/CEN/EXT/ALL 등) → 표 3분할 키 (캔버스 보라 라벨 `member_zone_text` 와 동일 출처) */
+  function beamFlatMemberZoneDisplayKeyFromPlane(pl) {
+    const raw = String((pl && pl.member_zone_text) || '').trim().toUpperCase().replace(/\s+/g, '');
+    if (!raw) return '';
+    if (raw.indexOf('INT') >= 0) return 'INT';
+    if (raw.indexOf('CENTER') >= 0 || raw === 'CEN' || raw.indexOf('CEN') === 0) return 'CEN';
+    if (raw.indexOf('ALL') >= 0) return 'ALL';
+    if (raw.indexOf('EXT') >= 0 || raw.indexOf('EXTERIOR') >= 0) return 'EXT';
+    if (raw.indexOf('END') >= 0) return 'EXT';
+    return '';
+  }
+
+  /** 캔버스 단면 라벨과 동일: 링크로 채워진 member_mark + member_zone (없으면 행 기준 Name) */
+  function beamFlatMemberTableNameForFlatRow(run, rowIndex, labMap, flatPl) {
+    const mm = String((flatPl && flatPl.member_mark_text) || '').trim();
+    const mz = String((flatPl && flatPl.member_zone_text) || '').trim();
+    if (mm || mz) {
+      const s = (mm + (mz ? ' ·' + mz : '')).trim();
+      if (s) return beamMemberTableDisplayMarkStripDims(s);
+    }
+    return beamCanvasMemberNameForMemberTable(run, rowIndex, labMap);
+  }
+
   /**
    * 우측「부재별 표」(보·가로 Y묶음).
    * 서버는 beam_flat_member_table_rows 등을 내려줄 수 있으나, 기본은 프론트 단면·연결선과 동일 출처.
@@ -4982,11 +5020,6 @@
     const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
     try {
       beamFlatEnsureMergedSectionAnalysis(run);
-    } catch (e) {}
-    try {
-      (Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : []).forEach(function (pl) {
-        beamFlatFinalizeBelowTextSize(pl);
-      });
     } catch (e) {}
     const dbgLines = [];
     const dimMismatchRows = [];
@@ -5061,7 +5094,7 @@
         stir: String(opts.flatTxSrv.stir || flatTxBr.stir || '').trim(),
         skin: String(opts.flatTxSrv.skin || flatTxBr.skin || '').trim(),
       };
-      const resMm = beamFlatResolveTableWidthDepthMm(flatPl, opts.widthMm, opts.depthMm);
+      const resMm = beamFlatTableWidthDepthMmViewerFirst(flatPl, opts.widthMm, opts.depthMm);
       let widthCell = z(resMm.w);
       let depthCell = z(resMm.d);
       // 서버 flat 행(슬랩 단위)은 부위(INT/CEN/EXT/END/ALL)에 맞는 칼럼에만 값을 채운다.
@@ -5109,7 +5142,7 @@
         stExt = zKey === 'EXT' || zKey === 'ALL' ? tStir : '';
         sideCell = zKey ? tSkin : '';
       } else if (usePlaneRebar) {
-        const zk = rowPickZk || 'ALL';
+        const zk = beamFlatMemberZoneDisplayKeyFromPlane(flatPl) || rowPickZk || 'ALL';
         const hitInt = zk === 'INT' || zk === 'ALL';
         const hitCen = zk === 'CEN' || zk === 'ALL';
         const hitExt = zk === 'EXT' || zk === 'ALL';
@@ -5771,8 +5804,14 @@
       });
     } else {
       rows.forEach((r, ri) => {
-        const nameCell = beamCanvasMemberNameForMemberTable(run, ri, labMap);
         const flatPl = beamFlatAnalysisForExtractRow(run, ri, labMap);
+        const mergedPlaneN0 = Array.isArray(run.beam_flat_merged_section_analysis)
+          ? run.beam_flat_merged_section_analysis.length
+          : 0;
+        const nameCell =
+          mergedPlaneN0 > 0
+            ? beamFlatMemberTableNameForFlatRow(run, ri, labMap, flatPl)
+            : beamCanvasMemberNameForMemberTable(run, ri, labMap);
         const flatTxSrv = beamFlatTextValuesFromPlane(flatPl);
         html += oneRowHtml({
           ri: ri,
@@ -6309,13 +6348,16 @@
       const sx = formatBeamMergedStripXs(r, strips);
       const z = (x) => (x != null && x !== '' ? x : '');
       const zb = (key, val) => formatBeamExtractDisplay(key, val);
-      const nm = beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX);
       const mergedPlaneN = Array.isArray(fauxRun.beam_flat_merged_section_analysis)
         ? fauxRun.beam_flat_merged_section_analysis.length
         : 0;
       const flatPl = beamFlatAnalysisForExtractRow(fauxRun, ri, labMapX);
+      const nm =
+        mergedPlaneN > 0
+          ? beamFlatMemberTableNameForFlatRow(fauxRun, ri, labMapX, flatPl)
+          : beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX);
       const flatTx = beamFlatTextValuesFromPlane(flatPl);
-      const resMm = beamFlatResolveTableWidthDepthMm(flatPl, r.width_mm, r.depth_mm);
+      const resMm = beamFlatTableWidthDepthMmViewerFirst(flatPl, r.width_mm, r.depth_mm);
       const rz = mergedPlaneN > 0 ? beamHorizontalRowZoneKeyFromMemberLine(fauxRun, ri, labMapX) : '';
       let cTopInt = '';
       let cTopCen = '';
@@ -6328,7 +6370,7 @@
       let cStExt = '';
       let cSide = '';
       if (mergedPlaneN > 0) {
-        const zk = rz || 'ALL';
+        const zk = beamFlatMemberZoneDisplayKeyFromPlane(flatPl) || rz || 'ALL';
         const hitInt = zk === 'INT' || zk === 'ALL';
         const hitCen = zk === 'CEN' || zk === 'ALL';
         const hitExt = zk === 'EXT' || zk === 'ALL';
