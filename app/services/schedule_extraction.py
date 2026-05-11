@@ -2799,126 +2799,6 @@ def _detect_duplicates(rows_out: list[dict[str, Any]], key_fn) -> list[int]:
     return dup_idx
 
 
-def _beam_flat_zone_wh_mm(r: dict[str, Any], z: dict[str, Any]) -> tuple[Any, Any]:
-    sg = z.get("section_geometry") if isinstance(z.get("section_geometry"), dict) else {}
-    w = sg.get("width_mm")
-    d = sg.get("depth_mm")
-    if w is None:
-        w = r.get("width_mm")
-    if d is None:
-        d = r.get("depth_mm")
-    return w, d
-
-
-def _beam_flat_table_row_member_mark_dim_fields(
-    mark_raw: str,
-    zone_md: Any,
-    w: Any,
-    d: Any,
-) -> tuple[str, Any, Any, Any]:
-    """부재별표 행: 표시 부재명에서 괄호 치수 분리, 치수 dict·width/depth 보강."""
-    md_z = zone_md if isinstance(zone_md, dict) else None
-    disp_mk, md_p = beam_flat_member_mark_display_and_dims(str(mark_raw or "").strip())
-    md_out = md_z or md_p
-    wo, dd = w, d
-    if md_out:
-        if wo is None:
-            wo = md_out.get("width_mm")
-        if dd is None:
-            dd = md_out.get("depth_mm")
-    return disp_mk, md_out, wo, dd
-
-
-def build_beam_flat_member_table_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """flat 단면·존·하단텍스트만으로 부재별 표 1행 후보를 만든다(슬랩/존이 여러 개면 행을 나눔)."""
-    out: list[dict[str, Any]] = []
-    for ri, r in enumerate(rows):
-        zones = r.get("beam_section_geometry_zones")
-        if isinstance(zones, list) and len(zones) > 1:
-            for zi, z in enumerate(zones):
-                if not isinstance(z, dict):
-                    continue
-                w, d = _beam_flat_zone_wh_mm(r, z)
-                slab_idx = z.get("slab_index")
-                if slab_idx is None:
-                    slab_idx = zi
-                mark = str(z.get("member_mark_text") or r.get("mark") or r.get("name") or "").strip()
-                mark, mdv, w, d = _beam_flat_table_row_member_mark_dim_fields(
-                    mark, z.get("member_mark_dims"), w, d
-                )
-                zone_t = str(z.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip()
-                btr = z.get("below_text_role_values") if isinstance(z.get("below_text_role_values"), dict) else {}
-                out.append(
-                    {
-                        "source_row_index": ri,
-                        "slab_index": int(slab_idx) if isinstance(slab_idx, (int, float)) else slab_idx,
-                        "member_mark_text": mark,
-                        "member_zone_text": zone_t,
-                        "member_mark_dims": mdv,
-                        "below_text_role_values": dict(btr),
-                        "below_text_chain_values": list(z.get("below_text_chain_values") or [])
-                        if isinstance(z.get("below_text_chain_values"), list)
-                        else [],
-                        "width_mm": w,
-                        "depth_mm": d,
-                        "strip_x": z.get("x_center"),
-                        "section_geometry": z.get("section_geometry"),
-                    }
-                )
-            continue
-        if isinstance(zones, list) and len(zones) == 1 and isinstance(zones[0], dict):
-            z = zones[0]
-            w, d = _beam_flat_zone_wh_mm(r, z)
-            mark = str(z.get("member_mark_text") or r.get("mark") or "").strip()
-            mark, mdv, w, d = _beam_flat_table_row_member_mark_dim_fields(
-                mark, z.get("member_mark_dims"), w, d
-            )
-            zone_t = str(z.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip()
-            btr = z.get("below_text_role_values") if isinstance(z.get("below_text_role_values"), dict) else {}
-            out.append(
-                {
-                    "source_row_index": ri,
-                    "slab_index": z.get("slab_index", 0),
-                    "member_mark_text": mark,
-                    "member_zone_text": zone_t,
-                    "member_mark_dims": mdv,
-                    "below_text_role_values": dict(btr),
-                    "below_text_chain_values": list(z.get("below_text_chain_values") or [])
-                    if isinstance(z.get("below_text_chain_values"), list)
-                    else [],
-                    "width_mm": w,
-                    "depth_mm": d,
-                    "strip_x": z.get("x_center"),
-                    "section_geometry": z.get("section_geometry"),
-                }
-            )
-            continue
-        w, d = r.get("width_mm"), r.get("depth_mm")
-        mark = str(r.get("mark") or r.get("name") or "").strip()
-        mark, mdv, w, d = _beam_flat_table_row_member_mark_dim_fields(
-            mark, r.get("member_mark_dims"), w, d
-        )
-        btr = r.get("below_text_role_values") if isinstance(r.get("below_text_role_values"), dict) else {}
-        out.append(
-            {
-                "source_row_index": ri,
-                "slab_index": 0,
-                "member_mark_text": mark,
-                "member_zone_text": str(r.get("member_zone_text") or r.get("beam_vertical_zone_display_label") or "").strip(),
-                "member_mark_dims": mdv,
-                "below_text_role_values": dict(btr),
-                "below_text_chain_values": list(r.get("below_text_chain_values") or [])
-                if isinstance(r.get("below_text_chain_values"), list)
-                else [],
-                "width_mm": w,
-                "depth_mm": d,
-                "strip_x": r.get("_beam_row_cluster_centroid_x"),
-                "section_geometry": r.get("section_geometry"),
-            }
-        )
-    return out
-
-
 def build_beam_flat_member_zone_match_lines(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """
     서버 flat 단일 경로에서 부재→부위→단면(중심) 연결선을 프론트에 승격해 내려준다.
@@ -3113,7 +2993,6 @@ def extract_schedule(
         beam_zs_lines_all: list[dict[str, Any]] = []
         beam_picked_all: list[dict[str, Any]] = []
         beam_secs_all: list[dict[str, Any]] = []
-        beam_member_table_rows_all: list[dict[str, Any]] = []
         for bi, bx in enumerate(selection_bboxes):
             cfg2 = dict(raw)
             cfg2["__bbox_split"] = True
@@ -3164,24 +3043,6 @@ def extract_schedule(
                                     dst.append(it)
                     except Exception:
                         pass
-                try:
-                    mtr = val_i.get("beam_flat_member_table_rows")
-                    if isinstance(mtr, list) and mtr:
-                        for it in mtr:
-                            if not isinstance(it, dict):
-                                continue
-                            ii = dict(it)
-                            ii["bbox_index"] = bi
-                            # bbox별 결과의 source_row_index는 rows_i 기준이므로, 합친 rows_all 기준으로 offset 보정
-                            try:
-                                sri = ii.get("source_row_index")
-                                if isinstance(sri, (int, float)) and int(sri) >= 0:
-                                    ii["source_row_index"] = int(sri) + int(offset)
-                            except Exception:
-                                pass
-                            beam_member_table_rows_all.append(ii)
-                except Exception:
-                    pass
             offset += len(rows_i)
             regions.append(
                 {
@@ -3213,8 +3074,6 @@ def extract_schedule(
                 base["beam_flat_picked"] = beam_picked_all
             if beam_secs_all:
                 base["beam_flat_section_candidates"] = beam_secs_all
-            if beam_member_table_rows_all:
-                base["beam_flat_member_table_rows"] = beam_member_table_rows_all
         validation = base
         return rows_all, validation
 
@@ -3447,10 +3306,6 @@ def extract_schedule(
         except Exception as ex:
             validation["beam_flat_picked_error"] = f"{type(ex).__name__}: {ex}"[:300]
 
-        try:
-            validation["beam_flat_member_table_rows"] = build_beam_flat_member_table_rows(rows_out)
-        except Exception as ex:
-            validation["beam_flat_member_table_error"] = f"{type(ex).__name__}: {ex}"[:300]
         try:
             validation["beam_flat_member_zone_match_lines"] = build_beam_flat_member_zone_match_lines(rows_out)
         except Exception as ex:

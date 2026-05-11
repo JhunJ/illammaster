@@ -1248,23 +1248,28 @@
           </div>
           <div id="extractErrorListHost" class="extract-error-list-host extract-result-outside-body" style="display:none"></div>
           <div id="extractBeamDimMismatchWrap" class="extract-error-list-host extract-result-outside-body" style="display:none">
-            <div class="extract-error-list-card">
-              <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
-                <h4 class="extract-subsection-title" style="margin:0">단면 크기 원천 불일치</h4>
-                <label style="margin:0;font-size:0.78rem;display:flex;align-items:center;gap:6px;white-space:nowrap">
-                  Width·Depth 우선 선택
-                  <select id="selectBeamMmPrimary" title="먼저 쓸 원천. 비어 있으면 나머지 순서대로 채움(텍스트→치수선→단면)." style="font-size:0.78rem;padding:3px 6px">
-                    <option value="text">텍스트·표기 치수</option>
-                    <option value="dim">치수선 텍스트</option>
-                    <option value="outline">단면 기하(W·H)</option>
-                  </select>
-                </label>
+            <details id="extractBeamDimMismatchDetails" class="extract-debug-subdetails extract-beam-dim-mismatch-details">
+              <summary class="extract-subsection-title" style="cursor:pointer;user-select:none;margin:0">
+                단면 크기 원천 불일치 — 펼치기
+              </summary>
+              <div class="extract-error-list-card" style="margin-top:8px">
+                <div style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:8px;margin-bottom:6px">
+                  <span class="extract-subsection-title" style="margin:0;font-size:0.82rem">Width·Depth 우선 선택</span>
+                  <label style="margin:0;font-size:0.78rem;display:flex;align-items:center;gap:6px;white-space:nowrap">
+                    우선순위
+                    <select id="selectBeamMmPrimary" title="먼저 쓸 원천. 비어 있으면 나머지 순서대로 채움(텍스트→치수선→단면)." style="font-size:0.78rem;padding:3px 6px">
+                      <option value="text">텍스트·표기 치수</option>
+                      <option value="dim">치수선 텍스트</option>
+                      <option value="outline">단면 기하(W·H)</option>
+                    </select>
+                  </label>
+                </div>
+                <p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.7rem;color:#57606a">
+                  부재별표 그룹 안 <strong>단면(plane) 1개</strong> = 행 1개. 텍스트 = 단면 아래 「크기」 텍스트(프론트 분석). 치수선 = 단면 주변 치수 라벨(프론트). 단면 W×H = 프론트 단면 외곽 bbox(<code>norm_bbox</code>) — 캔버스 빨간 박스의 W·H 라벨과 동일. 카테고리 간 12mm 이상 차이가 있을 때만 행으로 표시됩니다.
+                </p>
+                <div id="extractBeamDimMismatchHost" class="extract-result-table-wrap"></div>
               </div>
-              <p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.7rem;color:#57606a">
-                텍스트 = 단면 아래 「크기」 + 부재표기 괄호치수(member). 치수선 = 단면 주변 치수 라벨. 단면 = 읽은 상·하 가로선 거리 기반 W/H. 서열에 없는 값만 서로 차이 나면 행으로 표시됩니다.
-              </p>
-              <div id="extractBeamDimMismatchHost" class="extract-result-table-wrap"></div>
-            </div>
+            </details>
           </div>
           <div id="extractMemberBlock" class="extract-member-block extract-result-outside-body" style="display:none">
             <div class="extract-member-head">
@@ -1285,7 +1290,17 @@
                     부재별표 디버그 텍스트 복사
                   </button>
                 </div>
-                <pre id="extractBeamMemberTableDebugPre" class="out" style="max-height:min(32vh, 260px)"></pre>
+                <pre id="extractBeamMemberTableDebugPre" class="out" style="max-height:min(28vh, 220px)"></pre>
+                <hr style="border:none;border-top:1px solid #d0d7de;margin:10px 0" />
+                <p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.7rem;color:#57606a">
+                  <strong>프론트 단면 → 부재별표</strong> 전달 검증용 탭(TSV) 로그. 엑셀에 붙여 넣으면 열별로 분리됩니다. 표시행·flatIx·ICE·wdSrc로 뷰어 계산이 표에 반영됐는지 확인하세요.
+                </p>
+                <div class="extract-debug-copybar" style="margin:6px 0 8px">
+                  <button type="button" class="secondary" id="btnBeamMemberTableForwardDebugCopy">
+                    전달 트레이스 TSV 복사
+                  </button>
+                </div>
+                <pre id="extractBeamMemberTableForwardDebugPre" class="out" style="max-height:min(36vh, 340px);font-size:0.66rem;line-height:1.35"></pre>
               </details>
             </div>
           </div>
@@ -3437,7 +3452,7 @@
     if (rows.length) {
       lines.push('[부재별 요약]');
       rows.forEach((r, ri) => {
-        const nm = run ? beamCanvasMemberNameForMemberTable(run, ri) : '';
+        const nm = run ? beamMemberTableDisplayMarkStripBundledZone(beamCanvasMemberNameForMemberTable(run, ri)) : '';
         lines.push(
           [
             ri + 1,
@@ -3951,8 +3966,10 @@
       return;
     }
     const runB = lastRunByCategory.beam;
-    if (runB && (!Array.isArray(runB.beam_flat_merged_section_analysis) || !runB.beam_flat_merged_section_analysis.length)) {
-      beamFlatEnsureMergedSectionAnalysis(runB);
+    if (runB) {
+      try {
+        beamFlatEnsureMergedSectionAnalysis(runB);
+      } catch (e) {}
     }
     const arr = runB && Array.isArray(runB.beam_flat_merged_section_analysis) ? runB.beam_flat_merged_section_analysis : [];
     wrap.style.display = 'block';
@@ -3975,6 +3992,9 @@
     }
     const lines = [];
     lines.push('[보 flat 하단 텍스트 매칭 디버그]');
+    lines.push(
+      '- 아래 각 평면의 「표시값(…)」은 부재별표·TSV flat_*와 동일하게 beamFlatTextValuesFromPlane + formatBeamExtractDisplay 입니다. 존 행은 같은 평면을 여러 행에서 참조할 수 있습니다.',
+    );
     for (let i = 0; i < arr.length; i++) {
       const pl = arr[i] || {};
       const dir = pl.below_text_dir === 'largeY' ? '↓=Y+' : '↓=Y-';
@@ -3993,6 +4013,8 @@
         const nearV = ns && ns.keep_v != null ? Number(ns.keep_v) : 0;
         const rejOv = ns && ns.rej_overlap != null ? Number(ns.rej_overlap) : 0;
         const rejLong = ns && ns.rej_long_straight != null ? Number(ns.rej_long_straight) : 0;
+        const rejBh = ns && ns.rej_band_height != null ? Number(ns.rej_band_height) : 0;
+        const rejBw = ns && ns.rej_band_width != null ? Number(ns.rej_band_width) : 0;
         const candH = ns && ns.cand_h != null ? Number(ns.cand_h) : 0;
         const candV = ns && ns.cand_v != null ? Number(ns.cand_v) : 0;
         lines.push(
@@ -4012,10 +4034,14 @@
             candH +
             '/' +
             candV +
-            ' rej(overlap/longStraight)=' +
+            ' rej(overlap/long/bandH/bandW)=' +
             rejOv +
             '/' +
-            rejLong,
+            rejLong +
+            '/' +
+            rejBh +
+            '/' +
+            rejBw,
         );
         if (ns && (ns.maxHorzRun != null || ns.maxVertRun != null)) {
           lines.push(
@@ -4023,6 +4049,10 @@
               (ns.maxHorzRun != null ? Number(ns.maxHorzRun).toFixed(1) : '-') +
               ' maxVertRun=' +
               (ns.maxVertRun != null ? Number(ns.maxVertRun).toFixed(1) : '-') +
+              ' capSpan(W/H)=' +
+              (ns.maxSpanXForBand != null ? Number(ns.maxSpanXForBand).toFixed(1) : '-') +
+              '/' +
+              (ns.maxSpanYForBand != null ? Number(ns.maxSpanYForBand).toFixed(1) : '-') +
               ' minOverlap=' +
               (ns.minOverlap != null ? Number(ns.minOverlap).toFixed(3) : '-') +
               ' pad=' +
@@ -4083,6 +4113,21 @@
             (flagD ? ' ' + flagD : ''),
         );
       }
+      try {
+        const tv = beamFlatTextValuesFromPlane(pl);
+        const topD = formatBeamExtractDisplay('int_top_bar', tv.top) || '—';
+        const botD = formatBeamExtractDisplay('int_bot_bar', tv.bot) || '—';
+        const stirD = formatBeamExtractDisplay('int_stirrup_bar', tv.stir) || '—';
+        let roleLine =
+          '  => 표시값(부재별표·TSV와 동일 정규화): TOP ' +
+          topD +
+          ' | BOT ' +
+          botD +
+          ' | STIR ' +
+          stirD;
+        if (tv.skin) roleLine += ' | SKIN ' + (formatBeamExtractDisplay('side_bar', tv.skin) || '—');
+        lines.push(roleLine);
+      } catch (e) {}
     }
     const plain = lines.join('\n');
     window.__lastBeamFlatBelowMatchDebugPlain = plain;
@@ -4103,8 +4148,10 @@
       return;
     }
     const runB = lastRunByCategory.beam;
-    if (runB && (!Array.isArray(runB.beam_flat_merged_section_analysis) || !runB.beam_flat_merged_section_analysis.length)) {
-      beamFlatEnsureMergedSectionAnalysis(runB);
+    if (runB) {
+      try {
+        beamFlatEnsureMergedSectionAnalysis(runB);
+      } catch (e) {}
     }
     const arr = runB && Array.isArray(runB.beam_flat_merged_section_analysis) ? runB.beam_flat_merged_section_analysis : [];
     wrap.style.display = 'block';
@@ -4368,8 +4415,10 @@
       return;
     }
     const runB = lastRunByCategory.beam;
-    if (runB && (!Array.isArray(runB.beam_flat_merged_section_analysis) || !runB.beam_flat_merged_section_analysis.length)) {
-      beamFlatEnsureMergedSectionAnalysis(runB);
+    if (runB) {
+      try {
+        beamFlatEnsureMergedSectionAnalysis(runB);
+      } catch (e) {}
     }
     const arr = runB && Array.isArray(runB.beam_flat_merged_section_analysis) ? runB.beam_flat_merged_section_analysis : [];
     wrap.style.display = 'block';
@@ -4405,6 +4454,8 @@
       const candV = ns.cand_v != null ? Number(ns.cand_v) : 0;
       const rejOv = ns.rej_overlap != null ? Number(ns.rej_overlap) : 0;
       const rejLong = ns.rej_long_straight != null ? Number(ns.rej_long_straight) : 0;
+      const rejBh = ns.rej_band_height != null ? Number(ns.rej_band_height) : 0;
+      const rejBw = ns.rej_band_width != null ? Number(ns.rej_band_width) : 0;
       lines.push(
         '#' +
           (i + 1) +
@@ -4426,10 +4477,14 @@
           candH +
           '/' +
           candV +
-          ' rej(overlap/longStraight)=' +
+          ' rej(overlap/long/bandH/bandW)=' +
           rejOv +
           '/' +
-          rejLong,
+          rejLong +
+          '/' +
+          rejBh +
+          '/' +
+          rejBw,
       );
       if (ns.maxHorzRun != null || ns.maxVertRun != null) {
         lines.push(
@@ -4437,6 +4492,10 @@
             (ns.maxHorzRun != null ? Number(ns.maxHorzRun).toFixed(1) : '-') +
             ' maxVertRun=' +
             (ns.maxVertRun != null ? Number(ns.maxVertRun).toFixed(1) : '-') +
+            ' capSpan(W/H)=' +
+            (ns.maxSpanXForBand != null ? Number(ns.maxSpanXForBand).toFixed(1) : '-') +
+            '/' +
+            (ns.maxSpanYForBand != null ? Number(ns.maxSpanYForBand).toFixed(1) : '-') +
             ' minOverlap=' +
             (ns.minOverlap != null ? Number(ns.minOverlap).toFixed(3) : '-') +
             ' pad=' +
@@ -4813,7 +4872,7 @@
       const sx = formatBeamMergedStripXs(r, strips);
       const z = (x) => (x != null && x !== '' ? String(x) : '');
       const zb = (key, val) => escapeHtml(formatBeamExtractDisplay(key, val));
-      const nameCell = beamCanvasMemberNameForMemberTable(run, ri);
+      const nameCell = beamMemberTableDisplayMarkStripBundledZone(beamCanvasMemberNameForMemberTable(run, ri));
       html += '<tr class="' + cls + '" data-extract-nav-row="' + ri + '">';
       html += '<td class="num">' + (ri + 1) + '</td>';
       html += '<td>' + escapeHtml(nameCell) + '</td>';
@@ -4838,11 +4897,7 @@
     return html;
   }
 
-  /**
-   * false면 부재별 표·엑셀 보_부재는 서버 beam_flat_member_table_rows를 쓰지 않고
-   * 캔버스와 동일한 프론트 단면(beam_flat_merged_section_analysis) 기준으로 맞춘다.
-   */
-  var beamMemberTableUseServerFlatRows = false;
+  /** 보 부재별 표·보_부재 엑셀: 오직 프론트 beam_flat_merged_section_analysis(뷰어 단면)만 사용. */
 
   function beamFlatTextValuesFromPlane(pl) {
     const rv = (pl && pl.below_text_role_values) || {};
@@ -4904,15 +4959,58 @@
     return { x: xc, y: yRef };
   }
 
-  function beamFlatAnalysisForExtractRow(run, rowIndex, labMap) {
+  /** 서버 `beam_section_geometry_zones[].section_geometry` bbox 중심(가능하면). */
+  function beamFlatSectionGeometryBBoxCenterXY(sg) {
+    if (!sg || typeof sg !== 'object') return null;
+    const cg = sg.cluster_geometry || {};
+    const bb =
+      (Array.isArray(sg.search_bbox) &&
+        sg.search_bbox.length >= 4 &&
+        sg.search_bbox.every(function (q) {
+          return Number.isFinite(Number(q));
+        }) &&
+        sg.search_bbox) ||
+      (Array.isArray(sg.search_bbox_loose) &&
+        sg.search_bbox_loose.length >= 4 &&
+        sg.search_bbox_loose.every(function (q) {
+          return Number.isFinite(Number(q));
+        }) &&
+        sg.search_bbox_loose) ||
+      (Array.isArray(cg.cluster_bbox) &&
+        cg.cluster_bbox.length >= 4 &&
+        cg.cluster_bbox.every(function (q) {
+          return Number.isFinite(Number(q));
+        }) &&
+        cg.cluster_bbox) ||
+      null;
+    if (!bb) return null;
+    return [(Number(bb[0]) + Number(bb[2])) * 0.5, (Number(bb[1]) + Number(bb[3])) * 0.5];
+  }
+
+  /** 슬랩(존) 엔트리 → 병합 단면 후보에 넣을 앵커 XY (서버 strip_x·section_center와 동계). */
+  function beamFlatZoneEntryAnchorXY(zoneEntry, run, rowIndex, labMap) {
+    if (!zoneEntry) return beamFlatAnchorXYForMemberTableRow(run, rowIndex, labMap);
+    const sc = zoneEntry.section_center;
+    if (sc && Number.isFinite(Number(sc.x)) && Number.isFinite(Number(sc.y))) {
+      return { x: Number(sc.x), y: Number(sc.y) };
+    }
+    const c = beamFlatSectionGeometryBBoxCenterXY(zoneEntry.section_geometry);
+    if (c && [c[0], c[1]].every(Number.isFinite)) return { x: c[0], y: c[1] };
+    const xc = Number(zoneEntry.x_center);
+    if (Number.isFinite(xc)) {
+      const info = beamHorizontalClusterIndexForRow(run, rowIndex);
+      const yRef = info && Number.isFinite(info.yMean)
+        ? info.yMean
+        : info && info.cluster && Number(info.cluster.y_mean);
+      if (Number.isFinite(yRef)) return { x: xc, y: yRef };
+    }
+    return beamFlatAnchorXYForMemberTableRow(run, rowIndex, labMap);
+  }
+
+  function beamFlatPickMergedPlaneAtXY(run, zx, zy) {
     const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
     if (!arr.length) return null;
-    const anchor = beamFlatAnchorXYForMemberTableRow(run, rowIndex, labMap);
-    const zx = anchor && Number(anchor.x);
-    const zy = anchor && Number(anchor.y);
-    if (![zx, zy].every(Number.isFinite)) {
-      return arr[0] || null;
-    }
+    if (![zx, zy].every(Number.isFinite)) return arr[0] || null;
     const links = Array.isArray(run.beam_flat_center_links) ? run.beam_flat_center_links : [];
     let best = null;
     let bestS = Infinity;
@@ -4948,6 +5046,59 @@
     return best || (arr.length === 1 ? arr[0] : null);
   }
 
+  function beamFlatMarkTokensEqual(a, b) {
+    const u = beamMemberTableDisplayMarkStripDims(String(a || '').trim()).toUpperCase();
+    const v = beamMemberTableDisplayMarkStripDims(String(b || '').trim()).toUpperCase();
+    return !!(u && v && u === v);
+  }
+
+  /** 존 앵커 근처 단면 중, 표 부호(beam_strip_display_mark 등)와 member_mark_text가 맞는 평면을 우선(오인 RG3B 등 방지). */
+  function beamFlatPickMergedPlaneForZone(run, rowIndex, labMap, zoneEntry) {
+    const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
+    if (!arr.length) return null;
+    const anchor = zoneEntry ? beamFlatZoneEntryAnchorXY(zoneEntry, run, rowIndex, labMap) : beamFlatAnchorXYForMemberTableRow(run, rowIndex, labMap);
+    const zx = anchor && Number(anchor.x);
+    const zy = anchor && Number(anchor.y);
+    const rows = (run && run.rows) || [];
+    const r = rows[rowIndex] || {};
+    const want = String(
+      (zoneEntry && (zoneEntry.beam_strip_display_mark || zoneEntry.member_mark_text)) || r.mark || r.name || '',
+    ).trim();
+    let pl = beamFlatPickMergedPlaneAtXY(run, zx, zy);
+    if (!want || !pl) return pl;
+    if (beamFlatMarkTokensEqual(pl.member_mark_text, want)) return pl;
+    let best = null;
+    let bestS = Infinity;
+    for (let ai = 0; ai < arr.length; ai++) {
+      const p = arr[ai];
+      if (!p || !beamFlatMarkTokensEqual(p.member_mark_text, want)) continue;
+      const c = beamFlatPlaneCentroidXY(p);
+      if (!c) continue;
+      const dx = Math.abs(c[0] - zx);
+      const dy = Math.abs(c[1] - zy);
+      const s = dy + dx * 0.2;
+      if (s < bestS) {
+        bestS = s;
+        best = p;
+      }
+    }
+    return best || pl;
+  }
+
+  function beamFlatAnalysisForExtractRow(run, rowIndex, labMap) {
+    const anchor = beamFlatAnchorXYForMemberTableRow(run, rowIndex, labMap);
+    const zx = anchor && Number(anchor.x);
+    const zy = anchor && Number(anchor.y);
+    return beamFlatPickMergedPlaneAtXY(run, zx, zy);
+  }
+
+  function beamFlatAnalysisForExtractRowZone(run, rowIndex, labMap, zoneEntry) {
+    /* zoneEntry 없어도 beamFlatPickMergedPlaneForZone(null)은 행 앵커 + r.mark로 단면 재탐색(존 있을 때만 하던 표기 일치 보정). */
+    let pl = beamFlatPickMergedPlaneForZone(run, rowIndex, labMap, zoneEntry);
+    if (!pl) pl = beamFlatAnalysisForExtractRow(run, rowIndex, labMap);
+    return pl;
+  }
+
   function beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD) {
     if (!flatPl) return { w: fallbackW, d: fallbackD };
     const bucks = beamFlatExtractMmBucketsFromPlane(flatPl);
@@ -4957,13 +5108,12 @@
     return { w: fallbackW, d: fallbackD };
   }
 
-  /** 오버레이 `beamFlatMergedSectionOverlayLabelLines`와 동일 우선: 부재표기치수 → 텍스트 크기 → 기존 버킷 */
+  /**
+   * Width·Depth: 프론트뷰 단면(텍스트·표기 / 치수선 / 단면 W×H bbox) 만으로 결정.
+   * 서버에서 채워질 수 있는 `member_mark_dims`(부재명 표기 괄호치수 동기화 결과) 폴백은 사용하지 않는다.
+   */
   function beamFlatTableWidthDepthMmViewerFirst(flatPl, fallbackW, fallbackD) {
     if (!flatPl) return { w: fallbackW, d: fallbackD };
-    const md = flatPl.member_mark_dims;
-    if (md && Number.isFinite(Number(md.width_mm)) && Number.isFinite(Number(md.depth_mm))) {
-      return { w: Number(md.width_mm), d: Number(md.depth_mm) };
-    }
     const rv = flatPl.below_text_role_values || {};
     const parsed = beamFlatParseBxHNumsFromString(rv['크기'] != null ? String(rv['크기']) : '');
     if (parsed && Number.isFinite(parsed.width_mm) && Number.isFinite(parsed.depth_mm)) {
@@ -4972,15 +5122,42 @@
     return beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD);
   }
 
-  /** `computeBeamHorizontalZoneMatches` 내부 zoneKey 와 동일 규칙(부위 라벨 텍스트 → INT/CENTER/ALL/EXT/END) */
-  function beamFlatZoneKeyFromClusterLabel(t) {
-    const s = String(t || '').toUpperCase().replace(/\s+/g, '');
+  /** zone 의 `member_mark_dims`(서버 매칭 결과)도 더 이상 사용하지 않는다 — plane 기준만 사용. */
+  function beamFlatTableWidthDepthMmViewerFirstZone(flatPl, zoneEntry, fallbackW, fallbackD) {
+    return beamFlatTableWidthDepthMmViewerFirst(flatPl, fallbackW, fallbackD);
+  }
+
+  /** 부위 라벨 선두 토큰(INT/END/EXT/CEN/ALL). `END( INT. )` 등은 END가 우선(괄호 안 INT 오인 방지). */
+  function beamFlatParseMemberZoneLeadKey(t) {
+    const s = String(t || '').trim();
     if (!s) return '';
-    if (s.indexOf('INT') >= 0) return 'INT';
-    if (s.indexOf('CENTER') >= 0 || s === 'CEN' || s.indexOf('CEN') === 0) return 'CENTER';
+    const m = s.match(/^\s*(INT|END|EXT|EXTERIOR|CENTER|CEN|ALL)\b/i);
+    if (!m) return '';
+    const u = m[1].toUpperCase();
+    if (u === 'EXTERIOR' || u === 'EXT') return 'EXT';
+    if (u === 'CENTER' || u === 'CEN') return 'CEN';
+    if (u === 'END') return 'END';
+    if (u === 'INT') return 'INT';
+    if (u === 'ALL') return 'ALL';
+    return '';
+  }
+
+  /** `computeBeamHorizontalZoneMatches` 내부 zoneKey 와 동일 규칙(부위 라벨 → INT/CENTER/ALL/EXT/END) */
+  function beamFlatZoneKeyFromClusterLabel(t) {
+    const lead = beamFlatParseMemberZoneLeadKey(t);
+    if (lead === 'INT') return 'INT';
+    if (lead === 'CEN') return 'CENTER';
+    if (lead === 'ALL') return 'ALL';
+    if (lead === 'EXT') return 'EXT';
+    if (lead === 'END') return 'END';
+    const stripped = String(t || '').replace(/\([^)]*\)/gi, ' ');
+    const s = stripped.toUpperCase().replace(/\s+/g, '');
+    if (!s) return '';
     if (s.indexOf('ALL') >= 0) return 'ALL';
+    if (s.indexOf('CENTER') >= 0 || s === 'CEN' || s.indexOf('CEN') === 0) return 'CENTER';
     if (s.indexOf('EXT') >= 0 || s.indexOf('EXTERIOR') >= 0) return 'EXT';
     if (s.indexOf('END') >= 0) return 'END';
+    if (s.indexOf('INT') >= 0) return 'INT';
     return '';
   }
 
@@ -5000,51 +5177,430 @@
     return beamFlatZoneKeyToMemberTableCols(beamFlatZoneKeyFromClusterLabel((pl && pl.member_zone_text) || ''));
   }
 
+  /** memberZoneLines 한 줄의 zone(z.z) → 표용 정규 키(INT/CEN/ALL/EXT/END). */
+  function beamFlatMemberLineRawZoneKey(line) {
+    const u = String(line && line.zone != null ? line.zone : '').trim().toUpperCase();
+    if (u === 'INT') return 'INT';
+    if (u === 'CENTER' || u === 'CEN') return 'CEN';
+    if (u === 'ALL') return 'ALL';
+    if (u === 'END') return 'END';
+    if (u === 'EXT') return 'EXT';
+    return beamFlatNormalizeZoneRawForTable(beamFlatZoneKeyFromClusterLabel(u));
+  }
+
+  function beamFlatNormalizeZoneRawForTable(zk) {
+    const u = String(zk || '').trim().toUpperCase();
+    if (u === 'CENTER') return 'CEN';
+    return u;
+  }
+
+  function beamFlatZoneLabelTextFromZoneEntry(z) {
+    if (!z) return '';
+    return String(z.member_zone_text || z.beam_vertical_zone_display_label || '').trim();
+  }
+
   /**
-   * 부위 INT/CEN/EXT 분류: 행에 매칭된 memberZoneLines 의 line.zone 우선(캔버스와 동일),
-   * 없으면 단면 링크의 member_zone_text.
+   * 존/부위 텍스트 → Int·Cen·Ext 열 채움.
+   * - 라벨에 BOTH(단독·`(BOTH)`·`INT.(BOTH)` 등)가 있으면 INT+EXT 동시.
+   * - END( INT. ) / END( EXT. ): 각각 INT 열만 / EXT 열만(단부 내·외면).
+   * - END 단독: EXT(단부 외단 규칙).
    */
-  function beamFlatMemberTableZoneColsKeyFromRow(run, rowIndex, labMap, flatPl) {
-    const got = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
-    const lz = got && got.line && got.line.zone;
-    let t = beamFlatZoneKeyToMemberTableCols(lz);
-    if (!t && flatPl) {
-      t = beamFlatMemberZoneDisplayKeyFromPlane(flatPl);
+  function beamFlatMemberTableZoneHitsFromZoneLabel(zLab) {
+    const raw = String(zLab || '').replace(/\s+/g, ' ').trim();
+    if (!raw) return null;
+    if (/\bBOTH\b/i.test(raw) || /\(\s*BOTH/i.test(raw)) {
+      return { hitInt: true, hitCen: false, hitExt: true };
     }
-    return t || 'ALL';
-  }
-
-  /** Name: 부재표기에서 치수 괄호 제거 후, 부위는 별도(마크에 섞이지 않게). */
-  function beamFlatMemberTableNameForFlatRow(run, rowIndex, labMap, flatPl) {
-    const mm0 = String((flatPl && flatPl.member_mark_text) || '').trim();
-    const mz0 = String((flatPl && flatPl.member_zone_text) || '').trim();
-    if (!mm0 && !mz0) return beamCanvasMemberNameForMemberTable(run, rowIndex, labMap);
-    const mm = beamMemberTableDisplayMarkStripDims(mm0);
-    const mz = beamMemberTableDisplayMarkStripDims(mz0);
-    if (mm && mz) return (mm + ' · ' + mz).trim();
-    return (mm || mz).trim();
+    const lead = beamFlatParseMemberZoneLeadKey(raw);
+    if (lead === 'ALL') return { hitInt: true, hitCen: true, hitExt: true };
+    if (lead === 'CEN') return { hitInt: false, hitCen: true, hitExt: false };
+    if (lead === 'INT') return { hitInt: true, hitCen: false, hitExt: false };
+    if (lead === 'EXT') return { hitInt: false, hitCen: false, hitExt: true };
+    if (lead === 'END') {
+      if (/\(\s*INT/i.test(raw)) return { hitInt: true, hitCen: false, hitExt: false };
+      if (/\(\s*EXT/i.test(raw)) return { hitInt: false, hitCen: false, hitExt: true };
+      return { hitInt: false, hitCen: false, hitExt: true };
+    }
+    const zk = beamFlatNormalizeZoneRawForTable(beamFlatZoneKeyFromClusterLabel(raw));
+    if (zk === 'ALL') return { hitInt: true, hitCen: true, hitExt: true };
+    if (zk === 'INT') return { hitInt: true, hitCen: false, hitExt: false };
+    if (zk === 'CEN') return { hitInt: false, hitCen: true, hitExt: false };
+    if (zk === 'EXT') return { hitInt: false, hitCen: false, hitExt: true };
+    if (zk === 'END') return { hitInt: false, hitCen: false, hitExt: true };
+    return null;
   }
 
   /**
-   * 우측「부재별 표」(보·가로 Y묶음).
-   * 서버는 beam_flat_member_table_rows 등을 내려줄 수 있으나, 기본은 프론트 단면·연결선과 동일 출처.
-   * beamMemberTableUseServerFlatRows === true 일 때만 서버 flat 슬랩 병합 표를 사용한다.
+   * 부위별 철근 칼럼: 슬랩 존 라벨(INT.(BOTH), END(INT/EXT) 등) 우선, 없으면 단면·memberZoneLines.
    */
+  function beamFlatMemberTableZoneColumnHitsFromRow(run, rowIndex, labMap, flatPl, zoneEntry) {
+    const zLab = beamFlatZoneLabelTextFromZoneEntry(zoneEntry);
+    let H = zLab ? beamFlatMemberTableZoneHitsFromZoneLabel(zLab) : null;
+    if (H) return H;
+    let raw = '';
+    if (zLab) raw = beamFlatNormalizeZoneRawForTable(beamFlatZoneKeyFromClusterLabel(zLab));
+    if (!raw && flatPl) {
+      raw = beamFlatNormalizeZoneRawForTable(beamFlatZoneKeyFromClusterLabel(String((flatPl && flatPl.member_zone_text) || '')));
+    }
+    if (!raw) {
+      const got = beamHorizontalPickMemberZoneLineForRow(run, rowIndex, labMap);
+      if (got && got.line) raw = beamFlatMemberLineRawZoneKey(got.line);
+    }
+    if (!raw) raw = 'ALL';
+    if (raw === 'ALL') return { hitInt: true, hitCen: true, hitExt: true };
+    if (raw === 'INT') return { hitInt: true, hitCen: false, hitExt: false };
+    if (raw === 'CEN') return { hitInt: false, hitCen: true, hitExt: false };
+    if (raw === 'EXT') return { hitInt: false, hitCen: false, hitExt: true };
+    if (raw === 'END') return { hitInt: false, hitCen: false, hitExt: true };
+    return { hitInt: true, hitCen: true, hitExt: true };
+  }
+
+  /**
+   * 부위 INT/CEN/EXT 단일 키(호환): END·EXT → EXT.
+   */
+  function beamFlatMemberTableZoneColsKeyFromRow(run, rowIndex, labMap, flatPl, zoneEntry) {
+    const H = beamFlatMemberTableZoneColumnHitsFromRow(run, rowIndex, labMap, flatPl, zoneEntry);
+    if (H.hitInt && H.hitCen && H.hitExt) return 'ALL';
+    if (H.hitInt && H.hitExt && !H.hitCen) return 'INT_EXT';
+    if (H.hitInt) return 'INT';
+    if (H.hitCen) return 'CEN';
+    if (H.hitExt) return 'EXT';
+    return 'ALL';
+  }
+
+  /**
+   * 부재별 표 Name 열: 병합 단면(beam_flat_merged_section_analysis)을 쓸 때는 캔버스 단면 박스의 부재명과 동일하게
+   * `flatPl.member_mark_text`(중심·링크로 주입된 표기)를 우선한다. 존 일람의 member_mark_text는 다른 부재 단면을
+   * 가리키는 경우가 있어(RG12 행의 CENTER가 RG13 단면 등) 여기서 우선하면 표·오버레이가 어긋난다.
+   * 스트립 표기가 확실한 부재부호일 때만 스트립을 Name으로 쓴다. 부위 접미(` · …`)는 제거.
+   */
+  function beamFlatMemberTableNameForFlatRow(run, rowIndex, labMap, flatPl, zoneEntry) {
+    const mergedN = Array.isArray(run && run.beam_flat_merged_section_analysis)
+      ? run.beam_flat_merged_section_analysis.length
+      : 0;
+    const stripMk = zoneEntry && String(zoneEntry.beam_strip_display_mark || '').trim();
+    const mm0 = String((flatPl && flatPl.member_mark_text) || '').trim();
+    if (mergedN > 0 && mm0) return beamMemberTableDisplayMarkStripDims(mm0);
+    if (stripMk && beamFlatLooksLikeMemberMarkText(stripMk)) return beamMemberTableDisplayMarkStripDims(stripMk);
+    const mmZ = zoneEntry && String(zoneEntry.member_mark_text || '').trim();
+    if (mmZ) return beamMemberTableDisplayMarkStripDims(mmZ);
+    if (mm0) return beamMemberTableDisplayMarkStripDims(mm0);
+    return beamMemberTableDisplayMarkStripBundledZone(beamCanvasMemberNameForMemberTable(run, rowIndex, labMap));
+  }
+
+  /** 존 엔트리 스트립 X 표시(서버 strip_x와 동일 계열). */
+  function beamFlatMemberTableStripXContent(run, rowIndex, zoneEntry, strips) {
+    const rows = (run && run.rows) || [];
+    const r = rows[rowIndex] || {};
+    if (zoneEntry && Number.isFinite(Number(zoneEntry.x_center))) return String(Number(zoneEntry.x_center));
+    return formatBeamMergedStripXs(r, strips);
+  }
+
+  /** plane 중심 X(Strip X 셀용) — plane-first 부재별표 전용. */
+  function beamFlatMemberTableStripXContentForPlane(flatPl) {
+    const c = beamFlatPlaneCentroidXY(flatPl);
+    if (!c || !Number.isFinite(Number(c[0]))) return '';
+    return String(Math.round(Number(c[0])));
+  }
+
+  /**
+   * plane(`beam_flat_merged_section_analysis[i]`) → 서버 `run.rows[]` 인덱스 매칭(메타용).
+   * 1) plane.member_mark_text 와 row.mark/name 정확 일치  2) row.beam_section_geometry_zones[].member_mark_text 일치
+   * 매칭 실패 시 -1.
+   */
+  function beamFlatMatchServerRowIndexForPlane(rows, flatPl) {
+    if (!Array.isArray(rows) || !rows.length || !flatPl) return -1;
+    const mm = String((flatPl.member_mark_text) || '').trim();
+    if (!mm) return -1;
+    const u = beamMemberTableDisplayMarkStripDims(mm).toUpperCase();
+    if (!u) return -1;
+    for (let i = 0; i < rows.length; i++) {
+      const r = rows[i] || {};
+      const rmRaw = String(r.mark != null ? r.mark : r.name || '').trim();
+      const rm = beamMemberTableDisplayMarkStripDims(rmRaw).toUpperCase();
+      if (rm && rm === u) return i;
+    }
+    for (let i = 0; i < rows.length; i++) {
+      const zs = (rows[i] && rows[i].beam_section_geometry_zones) || [];
+      for (let zi = 0; zi < zs.length; zi++) {
+        const z = zs[zi] || {};
+        const zmRaw = String(z.member_mark_text || '').trim();
+        const zm = beamMemberTableDisplayMarkStripDims(zmRaw).toUpperCase();
+        if (zm && zm === u) return i;
+      }
+    }
+    return -1;
+  }
+
+  /** plane-first Name 셀: plane 표기 우선, 없으면 매칭된 서버 row의 캔버스 부재명 폴백. */
+  function beamFlatMemberTableNameForPlaneFirst(run, flatPl, serverRowIdx, labMap) {
+    const mm0 = String((flatPl && flatPl.member_mark_text) || '').trim();
+    if (mm0) return beamMemberTableDisplayMarkStripDims(mm0);
+    if (serverRowIdx >= 0) {
+      const lm = labMap || buildPreviewLabelEidMap();
+      const fallback = beamCanvasMemberNameForMemberTable(run, serverRowIdx, lm);
+      if (fallback) return beamMemberTableDisplayMarkStripBundledZone(fallback);
+    }
+    return '';
+  }
+
+  /** plane을 도면 위→아래(Y desc) · 좌→우(X asc) 순으로 정렬. */
+  function beamFlatMemberTableOrderedPlaneIndexes(planes) {
+    if (!Array.isArray(planes) || !planes.length) return [];
+    return planes
+      .map(function (pl, i) {
+        const c = beamFlatPlaneCentroidXY(pl) || [0, 0];
+        return { i: i, x: Number(c[0]) || 0, y: Number(c[1]) || 0 };
+      })
+      .sort(function (a, b) {
+        if (a.y !== b.y) return b.y - a.y;
+        return a.x - b.x;
+      })
+      .map(function (e) {
+        return e.i;
+      });
+  }
+
+  /** 부재별표 행 병합 키: 표시 부재명을 정규화한 대문자. 빈 이름은 plane마다 고유키(서로 합치지 않음). */
+  function beamFlatMemberTableRowMergeKeyFromDisplayName(nameCell, planeIdx) {
+    const s = beamMemberTableDisplayMarkStripDims(String(nameCell || '').trim());
+    if (s) return s.toUpperCase();
+    return '__UNNAMED__#' + String(planeIdx);
+  }
+
+  /**
+   * 병합 행에서 한 plane 의 INT/CEN/EXT 컬럼 hit (zoneEntry 없음·plane.member_zone_text 만 사용).
+   * - BOTH(단독·괄호 포함) → INT+EXT
+   * - CENTER/CEN → CEN
+   * - 빈 라벨/미상 → ALL (그룹 내 단독 plane 일 때만 의미가 있음)
+   */
+  function beamFlatMemberTableZoneHitsForPlaneInGroup(flatPl) {
+    const txt = String((flatPl && flatPl.member_zone_text) || '').replace(/\s+/g, ' ').trim();
+    if (!txt) return { hitInt: true, hitCen: true, hitExt: true };
+    if (/\bBOTH\b/i.test(txt) || /\(\s*BOTH/i.test(txt)) {
+      return { hitInt: true, hitCen: false, hitExt: true };
+    }
+    const lead = beamFlatParseMemberZoneLeadKey(txt);
+    if (lead === 'ALL') return { hitInt: true, hitCen: true, hitExt: true };
+    if (lead === 'CEN') return { hitInt: false, hitCen: true, hitExt: false };
+    if (lead === 'INT') return { hitInt: true, hitCen: false, hitExt: false };
+    if (lead === 'EXT') return { hitInt: false, hitCen: false, hitExt: true };
+    if (lead === 'END') {
+      if (/\(\s*INT/i.test(txt)) return { hitInt: true, hitCen: false, hitExt: false };
+      if (/\(\s*EXT/i.test(txt)) return { hitInt: false, hitCen: false, hitExt: true };
+      return { hitInt: false, hitCen: false, hitExt: true };
+    }
+    const zk = beamFlatNormalizeZoneRawForTable(beamFlatZoneKeyFromClusterLabel(txt));
+    if (zk === 'ALL') return { hitInt: true, hitCen: true, hitExt: true };
+    if (zk === 'INT') return { hitInt: true, hitCen: false, hitExt: false };
+    if (zk === 'CEN') return { hitInt: false, hitCen: true, hitExt: false };
+    if (zk === 'EXT') return { hitInt: false, hitCen: false, hitExt: true };
+    if (zk === 'END') return { hitInt: false, hitCen: false, hitExt: true };
+    return { hitInt: true, hitCen: true, hitExt: true };
+  }
+
+  /**
+   * 그룹 내 plane zone 라벨을 보고, INT/EXT 가 어느 쪽도 명시되지 않았다면
+   * END plane 의 hits 를 INT+EXT 로 승격한다(예: CEN + END 만 있는 일람).
+   * - END( INT ) / END( EXT ) 처럼 괄호로 한쪽을 명시한 END 는 그대로 둔다.
+   * - 이미 INT 또는 EXT 단독·BOTH·ALL plane 이 있으면 승격하지 않는다(END 는 기본 EXT).
+   */
+  function beamFlatMemberTablePromoteEndHitsForGroup(items) {
+    if (!Array.isArray(items) || !items.length) return;
+    let hasExplicitInt = false;
+    let hasExplicitExt = false;
+    for (let i = 0; i < items.length; i++) {
+      const txt = String((items[i] && items[i].flatPl && items[i].flatPl.member_zone_text) || '');
+      if (!txt) continue;
+      if (/\bBOTH\b/i.test(txt) || /\(\s*BOTH/i.test(txt)) {
+        hasExplicitInt = true;
+        hasExplicitExt = true;
+        continue;
+      }
+      const lead = beamFlatParseMemberZoneLeadKey(txt);
+      if (lead === 'INT') hasExplicitInt = true;
+      if (lead === 'EXT') hasExplicitExt = true;
+      if (lead === 'ALL') {
+        hasExplicitInt = true;
+        hasExplicitExt = true;
+      }
+      if (lead === 'END') {
+        if (/\(\s*INT/i.test(txt)) hasExplicitInt = true;
+        if (/\(\s*EXT/i.test(txt)) hasExplicitExt = true;
+      }
+    }
+    if (hasExplicitInt || hasExplicitExt) return;
+    items.forEach(function (it) {
+      const txt = String((it && it.flatPl && it.flatPl.member_zone_text) || '');
+      if (!txt) return;
+      const lead = beamFlatParseMemberZoneLeadKey(txt);
+      if (lead !== 'END') return;
+      if (/\(\s*INT/i.test(txt) || /\(\s*EXT/i.test(txt)) return;
+      it.hits = { hitInt: true, hitCen: false, hitExt: true };
+      it.endPromotedToBoth = true;
+    });
+  }
+
+  /**
+   * 같은 부재명으로 묶인 plane 그룹 → 컬럼별 표시값 셋업.
+   * 1차: 단일 hit plane(INT/CEN/EXT 단독) 우선 매칭, 2차: 다중 hit(BOTH·ALL) plane 으로 빈 칸 채움.
+   * 반환은 escape 된 HTML 셀 문자열. SideBar 는 그룹 내 첫 plane 의 표피철근.
+   */
+  function beamFlatMemberTableComputeMergedCells(items, formatBeamExtractDisplayFn) {
+    const out = {
+      topInt: '',
+      topCen: '',
+      topExt: '',
+      botInt: '',
+      botCen: '',
+      botExt: '',
+      stInt: '',
+      stCen: '',
+      stExt: '',
+      sideCell: '',
+      hitInt: false,
+      hitCen: false,
+      hitExt: false,
+    };
+    if (!Array.isArray(items) || !items.length) return out;
+    const fmt = formatBeamExtractDisplayFn || formatBeamExtractDisplay;
+    const zb = function (key, val) {
+      return escapeHtml(fmt(key, val));
+    };
+    let intTx = null;
+    let cenTx = null;
+    let extTx = null;
+    function tryFill(item, opts) {
+      const onlySingle = !!(opts && opts.onlySingle);
+      const onlyMulti = !!(opts && opts.onlyMulti);
+      if (!item || !item.flatPl || !item.hits) return;
+      const h = item.hits;
+      const hc = (h.hitInt ? 1 : 0) + (h.hitCen ? 1 : 0) + (h.hitExt ? 1 : 0);
+      if (onlySingle && hc !== 1) return;
+      if (onlyMulti && hc <= 1) return;
+      const tx = beamFlatTextValuesFromPlane(item.flatPl);
+      if (h.hitInt && !intTx) intTx = tx;
+      if (h.hitCen && !cenTx) cenTx = tx;
+      if (h.hitExt && !extTx) extTx = tx;
+    }
+    items.forEach(function (it) {
+      tryFill(it, { onlySingle: true });
+    });
+    items.forEach(function (it) {
+      tryFill(it, { onlyMulti: true });
+    });
+    items.forEach(function (it) {
+      tryFill(it, {});
+    });
+    if (intTx) {
+      out.topInt = zb('int_top_bar', intTx.top);
+      out.botInt = zb('int_bot_bar', intTx.bot);
+      out.stInt = zb('int_stirrup_bar', intTx.stir);
+      out.hitInt = true;
+    }
+    if (cenTx) {
+      out.topCen = zb('cen_top_bar', cenTx.top);
+      out.botCen = zb('cen_bot_bar', cenTx.bot);
+      out.stCen = zb('cen_stirrup_bar', cenTx.stir);
+      out.hitCen = true;
+    }
+    if (extTx) {
+      out.topExt = zb('ext_top_bar', extTx.top);
+      out.botExt = zb('ext_bot_bar', extTx.bot);
+      out.stExt = zb('ext_stirrup_bar', extTx.stir);
+      out.hitExt = true;
+    }
+    for (let i = 0; i < items.length; i++) {
+      const tx = beamFlatTextValuesFromPlane(items[i] && items[i].flatPl);
+      if (tx && tx.skin) {
+        out.sideCell = zb('side_bar', tx.skin);
+        break;
+      }
+    }
+    return out;
+  }
+
+  /** 동일 부재명 그룹의 Strip X: 각 plane centroid X 를 중복 제거·정렬 후 ", " 연결. */
+
+  /**
+   * 부재별표 행 클릭 시 사용할 월드 bbox.
+   * 그룹의 모든 plane 단면(`section_bbox`/`norm_bbox`) ∪ centerLinks 의 텍스트 앵커(±anchorPad).
+   * 결과는 fitBounds 가 화면을 단면+부재명 라벨이 함께 보이는 줌으로 맞추는 데 사용한다.
+   */
+  function beamFlatMemberTableNavBboxForGroup(items, run, opts) {
+    if (!Array.isArray(items) || !items.length) return null;
+    const links = Array.isArray(run && run.beam_flat_center_links) ? run.beam_flat_center_links : [];
+    const planeIdxSet = Object.create(null);
+    let bb = null;
+    for (let i = 0; i < items.length; i++) {
+      const it = items[i];
+      const pl = it && it.flatPl;
+      if (!pl) continue;
+      const pi = Number(it.planeIdx);
+      if (Number.isFinite(pi)) planeIdxSet[pi] = true;
+      const pbb = isFiniteBBox4(pl.section_bbox)
+        ? pl.section_bbox
+        : isFiniteBBox4(pl.norm_bbox)
+          ? pl.norm_bbox
+          : null;
+      if (isFiniteBBox4(pbb)) bb = unionBBox4(bb, pbb.map(Number));
+      else {
+        const c = beamFlatPlaneCentroidXY(pl);
+        if (c) bb = unionBBox4(bb, [c[0] - 1, c[1] - 1, c[0] + 1, c[1] + 1]);
+      }
+    }
+    /* 텍스트 앵커는 점이라 ±pad 박스로 확장(부재명·부위 텍스트 위치를 화면 안에 포함) */
+    const anchorPad = opts && Number.isFinite(Number(opts.anchorPad)) ? Number(opts.anchorPad) : 240;
+    for (let li = 0; li < links.length; li++) {
+      const lk = links[li];
+      const ti = lk && lk.to != null ? Number(lk.to) : NaN;
+      if (!Number.isFinite(ti) || !planeIdxSet[ti]) continue;
+      const fx = Number(lk.fromX);
+      const fy = Number(lk.fromY);
+      if (![fx, fy].every(Number.isFinite)) continue;
+      bb = unionBBox4(bb, [fx - anchorPad, fy - anchorPad, fx + anchorPad, fy + anchorPad]);
+    }
+    if (!isFiniteBBox4(bb)) return null;
+    /* fitBounds 의 외곽 padding 만으로는 단면 외곽선·치수가 잘리는 경우가 있어 여유 확장 */
+    const dx = Math.max(1, Number(bb[2]) - Number(bb[0]));
+    const dy = Math.max(1, Number(bb[3]) - Number(bb[1]));
+    const exPad = Math.max(120, Math.min(900, (dx + dy) * 0.06));
+    return [Number(bb[0]) - exPad, Number(bb[1]) - exPad, Number(bb[2]) + exPad, Number(bb[3]) + exPad];
+  }
+
+  function beamFlatMemberTableMergedStripXContentForPlanes(planeObjs) {
+    if (!Array.isArray(planeObjs) || !planeObjs.length) return '';
+    const xs = [];
+    const seen = Object.create(null);
+    for (let i = 0; i < planeObjs.length; i++) {
+      const sx = beamFlatMemberTableStripXContentForPlane(planeObjs[i]);
+      if (!sx) continue;
+      const n = parseInt(String(sx).replace(/\s/g, ''), 10);
+      if (Number.isFinite(n) && !seen[n]) {
+        seen[n] = true;
+        xs.push(n);
+      }
+    }
+    if (!xs.length) return '';
+    xs.sort(function (a, b) {
+      return a - b;
+    });
+    return xs.join(', ');
+  }
+
+  /** 우측「부재별 표」(보·가로 Y묶음): 뷰어 flat 단면(beam_flat_merged_section_analysis·중심연결)과 동일 출처만 사용. */
   function renderBeamHorizontalMemberTableHtml(run) {
     const v = run.validation || {};
     const rows = Array.isArray(run.rows) ? run.rows : [];
     const dup = new Set(v.duplicate_row_indices || []);
     const strips = v.beam_vertical_strips || [];
     const labMap = buildPreviewLabelEidMap();
-    const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
     try {
       beamFlatEnsureMergedSectionAnalysis(run);
     } catch (e) {}
     const dbgLines = [];
     const dimMismatchRows = [];
     dbgLines.push('=== 부재별표(보·가로 Y묶음) 디버그 ===');
-    dbgLines.push('serverFlatRows: ' + serverFlatRows.length);
-    dbgLines.push('beamMemberTableUseServerFlatRows: ' + !!beamMemberTableUseServerFlatRows);
     dbgLines.push('beam_flat_picked: ' + (Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked.length : 0));
     dbgLines.push(
       'beam_flat_merged_section_analysis: ' +
@@ -5052,6 +5608,22 @@
     );
     dbgLines.push(
       'beam_flat_center_links: ' + (Array.isArray(run.beam_flat_center_links) ? run.beam_flat_center_links.length : 0),
+    );
+    dbgLines.push(
+      'beam_flat_pipeline (ensure→표·오버레이 공통): centers=' +
+        (run.__beamFlatOverlayCache && run.__beamFlatOverlayCache.centers
+          ? run.__beamFlatOverlayCache.centers.length
+          : 0) +
+        ' mergedGroups=' +
+        (run.__beamFlatOverlayCache && run.__beamFlatOverlayCache.mergedGroups
+          ? run.__beamFlatOverlayCache.mergedGroups.length
+          : 0) +
+        ' planes=' +
+        (Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis.length : 0) +
+        ' sync_ms=' +
+        (run.__beamFlatPipelineAt != null && Number.isFinite(Number(run.__beamFlatPipelineAt))
+          ? Number(run.__beamFlatPipelineAt).toFixed(2)
+          : '-'),
     );
 
     function beamFlatFmtMmPair(m) {
@@ -5077,21 +5649,168 @@
       'Side Bar',
       'Strip X',
     ];
-    const useSrvFlatTable = !!(serverFlatRows.length && beamMemberTableUseServerFlatRows);
-    let html = '';
-    if (useSrvFlatTable) {
-      html +=
-        '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">부재별 표는 서버 <strong>flat 단일 경로</strong> 결과(<code>beam_flat_member_table_rows</code>)를 우선합니다. 행 클릭 시 원본 추출 행(<code>source_row_index</code>)으로 이동합니다.</p>';
-    } else {
-      html +=
-        '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">부재별 표: <strong>프론트 단면</strong>(<code>beam_flat_merged_section_analysis</code>·중심연결)과 추출 행을 1:1로 표시합니다. Width·Depth는 단면에서 우선순위 반영. Name·행 클릭은 <code>getCachedBeamHorizontalMatch</code>·<code>picked</code>와 동일 출처입니다.' +
-        (serverFlatRows.length
-          ? ' <span style="color:#57606a">(서버 <code>beam_flat_member_table_rows</code>는 ' +
-            serverFlatRows.length +
-            '행 있으나 표 본문에는 사용하지 않습니다.)</span>'
-          : '') +
-        '</p>';
+    const forwardDbgLines = [];
+    forwardDbgLines.push('=== beam_front_to_table TSV v1 (tab-separated) ===');
+    forwardDbgLines.push(['run_id', String(run.id != null ? run.id : '-')].join('\t'));
+    forwardDbgLines.push(['beamMmPrimary', String(beamFlatGetMmPrimaryPreference())].join('\t'));
+    forwardDbgLines.push(['member_table_source', 'frontend_planes_first'].join('\t'));
+    forwardDbgLines.push(
+      '# 동일 표시 부재명(beamMemberTableDisplayMarkStripDims 기준)은 1행으로 병합. ri 는 대표 서버 행(첫 매칭).',
+    );
+    forwardDbgLines.push(
+      [
+        'pipeline_sync_ms',
+        run.__beamFlatPipelineAt != null && Number.isFinite(Number(run.__beamFlatPipelineAt))
+          ? String(run.__beamFlatPipelineAt.toFixed(2))
+          : '-',
+      ].join('\t'),
+    );
+    (function () {
+      const oc = run.__beamFlatOverlayCache;
+      forwardDbgLines.push(
+        [
+          'pipeline_counts',
+          oc && oc.centers ? String(oc.centers.length) : '0',
+          oc && oc.mergedGroups ? String(oc.mergedGroups.length) : '0',
+          Array.isArray(run.beam_flat_merged_section_analysis) ? String(run.beam_flat_merged_section_analysis.length) : '0',
+          Array.isArray(run.beam_flat_center_links) ? String(run.beam_flat_center_links.length) : '0',
+        ].join('\t'),
+      );
+    })();
+    forwardDbgLines.push(
+      '# 동일 파이프: beamFlatEnsureMergedSectionAnalysis → 캔버스 오버레이(__beamFlatOverlayCache) · 부재별표 · 아래 TSV 행이 같은 plane 객체를 참조',
+    );
+    forwardDbgLines.push(
+      '# flat_* 열은 해당 평면(below_text_role_values) 전체 표시값이며, 부재별표는 존(ICE 등)마다 행이 갈라져 같은 평면을 여러 행에서 가리킬 수 있음',
+    );
+    forwardDbgLines.push(
+      [
+        'dispRow',
+        'ri',
+        'rowMark',
+        'zoneIdx',
+        'zoneLabel',
+        'stripDispMark',
+        'stripX',
+        'secCx',
+        'secCy',
+        'flatIx',
+        'merged_n',
+        'merged_flat_ix',
+        'merged_hits',
+        'merged_zones',
+        'plMark',
+        'plZone',
+        'W_mm',
+        'D_mm',
+        'wdSrc',
+        'ICE',
+        'tblName',
+        'flat_top',
+        'flat_bot',
+        'flat_stir',
+      ].join('\t'),
+    );
+    function pushBeamMemberTableForwardTsvRow(o) {
+      const ri = o.ri;
+      const r = (ri >= 0 ? rows[ri] : null) || {};
+      const zoneEntry = o.zoneEntry || null;
+      const flatPl = o.flatPl;
+      const nameCell = o.nameCell;
+      const displayRowNum = o.displayRowNum;
+      const arr = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
+      let pi = Number.isFinite(Number(o.planeIndex)) ? Number(o.planeIndex) : -1;
+      if (pi < 0 && flatPl) {
+        for (let j = 0; j < arr.length; j++) {
+          if (arr[j] === flatPl) {
+            pi = j;
+            break;
+          }
+        }
+      }
+      const sc = zoneEntry && zoneEntry.section_center;
+      let secCx = '';
+      let secCy = '';
+      if (sc && Number.isFinite(Number(sc.x)) && Number.isFinite(Number(sc.y))) {
+        secCx = Number(sc.x).toFixed(1);
+        secCy = Number(sc.y).toFixed(1);
+      } else {
+        const bc = zoneEntry && beamFlatSectionGeometryBBoxCenterXY(zoneEntry.section_geometry);
+        if (bc && [bc[0], bc[1]].every(Number.isFinite)) {
+          secCx = Number(bc[0]).toFixed(1);
+          secCy = Number(bc[1]).toFixed(1);
+        }
+      }
+      const zLab = beamFlatZoneLabelTextFromZoneEntry(zoneEntry).replace(/\t/g, ' ');
+      const H = beamFlatMemberTableZoneColumnHitsFromRow(run, ri, labMap, flatPl, zoneEntry);
+      const ICE = (H.hitInt ? 'I' : '-') + (H.hitCen ? 'C' : '-') + (H.hitExt ? 'E' : '-');
+      const resMm = beamFlatTableWidthDepthMmViewerFirstZone(flatPl, zoneEntry, r.width_mm, r.depth_mm);
+      let wdSrc = 'buckets_or_row';
+      const mdZ = zoneEntry && zoneEntry.member_mark_dims;
+      if (mdZ && Number.isFinite(Number(mdZ.width_mm)) && Number.isFinite(Number(mdZ.depth_mm))) wdSrc = 'zone_member_mark_dims';
+      else if (
+        flatPl &&
+        flatPl.member_mark_dims &&
+        Number.isFinite(Number(flatPl.member_mark_dims.width_mm)) &&
+        Number.isFinite(Number(flatPl.member_mark_dims.depth_mm))
+      )
+        wdSrc = 'plane_member_mark_dims';
+      else {
+        const rv = (flatPl && flatPl.below_text_role_values) || {};
+        const cr = rv['크기'] != null ? beamFlatParseBxHNumsFromString(String(rv['크기'])) : null;
+        if (cr && Number.isFinite(Number(cr.width_mm)) && Number.isFinite(Number(cr.depth_mm))) wdSrc = 'role_크기';
+        else wdSrc = 'resolve_buckets';
+      }
+      const ft = beamFlatTextValuesFromPlane(flatPl);
+      const tc = function (s, n) {
+        s = String(s || '').replace(/\t/g, ' ').replace(/\r?\n/g, ' ');
+        return s.length > n ? s.slice(0, n) + '…' : s;
+      };
+      const rowMark = String(r.mark != null ? r.mark : r.name || '').replace(/\t/g, ' ');
+      const stripMk = (zoneEntry && String(zoneEntry.beam_strip_display_mark || '').trim().replace(/\t/g, ' ')) || '';
+      const stripX = zoneEntry && Number.isFinite(Number(zoneEntry.x_center)) ? String(zoneEntry.x_center) : '';
+      const zi = zoneEntry != null && zoneEntry.zone_index != null ? String(zoneEntry.zone_index) : '';
+      const mergedN = o.mergedPlaneCount != null ? String(o.mergedPlaneCount) : '1';
+      const mergedIx = o.mergedPlaneIndexes != null ? String(o.mergedPlaneIndexes) : String(pi);
+      const mh = o.mergedHits || null;
+      const mergedHitsStr = mh
+        ? (mh.hitInt ? 'I' : '-') + (mh.hitCen ? 'C' : '-') + (mh.hitExt ? 'E' : '-')
+        : ICE;
+      const mergedZonesStr = o.mergedZoneSummary != null
+        ? tc(String(o.mergedZoneSummary), 96)
+        : '';
+      forwardDbgLines.push(
+        [
+          displayRowNum,
+          ri,
+          rowMark,
+          zi,
+          zLab,
+          stripMk,
+          stripX,
+          secCx,
+          secCy,
+          pi,
+          mergedN,
+          mergedIx,
+          mergedHitsStr,
+          mergedZonesStr,
+          tc(flatPl && flatPl.member_mark_text, 28),
+          tc(flatPl && flatPl.member_zone_text, 24),
+          resMm.w != null && Number.isFinite(Number(resMm.w)) ? String(Math.round(Number(resMm.w))) : '',
+          resMm.d != null && Number.isFinite(Number(resMm.d)) ? String(Math.round(Number(resMm.d))) : '',
+          wdSrc,
+          ICE,
+          tc(nameCell, 24),
+          tc(formatBeamExtractDisplay('int_top_bar', ft.top), 40),
+          tc(formatBeamExtractDisplay('int_bot_bar', ft.bot), 40),
+          tc(formatBeamExtractDisplay('int_stirrup_bar', ft.stir), 40),
+        ].join('\t'),
+      );
     }
+    let html = '';
+    html +=
+      '<p class="extract-pivot-hint" style="margin:0 0 6px;font-size:0.72rem">부재별 표: 프론트뷰 단면(<code>beam_flat_merged_section_analysis</code>)을 기준으로 하되, <strong>표시 부재명이 같은 plane은 한 행으로 병합</strong>합니다(첫 plane의 Type·Material·철근·치수를 사용, Strip X는 묶인 centroid X 목록). 캔버스 오버레이와 동일 파이프(<code>beamFlatEnsureMergedSectionAnalysis</code>)입니다.</p>';
     html += '<div class="extract-result-table-wrap"><table class="extract-grid extract-member-tidy"><thead><tr>';
     th.forEach((t) => {
       html += '<th>' + escapeHtml(t) + '</th>';
@@ -5101,42 +5820,26 @@
     function oneRowHtml(opts) {
       const ri = opts.ri;
       const r = rows[ri] || {};
-      const cls = [dup.has(ri) ? 'extract-dup-row' : '', 'extract-nav-target'].filter(Boolean).join(' ');
-      const sx = opts.sx != null ? String(opts.sx) : formatBeamMergedStripXs(r, strips);
+      const isDup = opts.dupAny != null ? !!opts.dupAny : dup.has(ri);
+      const cls = [isDup ? 'extract-dup-row' : '', 'extract-nav-target'].filter(Boolean).join(' ');
+      const zoneEx = opts.zoneEntry || null;
+      const sx =
+        opts.sx != null
+          ? String(opts.sx)
+          : zoneEx
+            ? beamFlatMemberTableStripXContent(run, ri, zoneEx, strips)
+            : formatBeamMergedStripXs(r, strips);
       const z = (x) => (x != null && x !== '' ? String(x) : '');
       const zb = (key, val) => escapeHtml(formatBeamExtractDisplay(key, val));
-      const flatPl = beamFlatAnalysisForExtractRow(run, ri, labMap);
-      const flatTxBr = beamFlatTextValuesFromPlane(flatPl);
-      const flatTx = {
-        top: String(opts.flatTxSrv.top || flatTxBr.top || '').trim(),
-        bot: String(opts.flatTxSrv.bot || flatTxBr.bot || '').trim(),
-        stir: String(opts.flatTxSrv.stir || flatTxBr.stir || '').trim(),
-        skin: String(opts.flatTxSrv.skin || flatTxBr.skin || '').trim(),
-      };
-      const resMm = beamFlatTableWidthDepthMmViewerFirst(flatPl, opts.widthMm, opts.depthMm);
+      const flatPl =
+        opts.flatPl !== undefined ? opts.flatPl : beamFlatAnalysisForExtractRowZone(run, ri, labMap, zoneEx);
+      const flatTx = beamFlatTextValuesFromPlane(flatPl);
+      const resMm = beamFlatTableWidthDepthMmViewerFirstZone(flatPl, zoneEx, opts.widthMm, opts.depthMm);
       let widthCell = z(resMm.w);
       let depthCell = z(resMm.d);
-      // 서버 flat 행(슬랩 단위)은 부위(INT/CEN/EXT/END/ALL)에 맞는 칼럼에만 값을 채운다.
-      // 그렇지 않으면 동일 source_row_index를 공유하는 여러 행에서 원본 r.* 값이 반복되어 "중복"으로 보인다.
-      const zoneKeyRaw = String(opts.zoneKey || '').trim().toUpperCase();
-      const zKey =
-        zoneKeyRaw === 'INT'
-          ? 'INT'
-          : zoneKeyRaw === 'CEN' || zoneKeyRaw === 'CENTER'
-            ? 'CEN'
-            : zoneKeyRaw === 'EXT' || zoneKeyRaw === 'END'
-              ? 'EXT'
-              : zoneKeyRaw === 'ALL'
-                ? 'ALL'
-                : '';
-      const isSrv = !!opts.isServerFlatRow;
-      const tTop = flatTx.top || (isSrv ? '' : z(r.int_top_bar));
-      const tBot = flatTx.bot || (isSrv ? '' : z(r.int_bot_bar));
-      const tStir = flatTx.stir || (isSrv ? '' : z(r.int_stirrup_bar));
-      const tSkin = flatTx.skin || (isSrv ? '' : z(r.side_bar));
-
       const mergedPlaneN = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis.length : 0;
-      const usePlaneRebar = !isSrv && mergedPlaneN > 0;
+      const usePlaneRebar = mergedPlaneN > 0 && flatPl;
+      /* dimMismatchRows 푸시는 merged-loop에서 모든 plane을 합쳐 처리한다(아래) — 행 단위 단일 plane 계산은 폐지 */
 
       let topInt;
       let topCen;
@@ -5148,22 +5851,23 @@
       let stCen;
       let stExt;
       let sideCell;
-      if (isSrv) {
-        topInt = zKey === 'INT' || zKey === 'ALL' ? tTop : '';
-        topCen = zKey === 'CEN' || zKey === 'ALL' ? tTop : '';
-        topExt = zKey === 'EXT' || zKey === 'ALL' ? tTop : '';
-        botInt = zKey === 'INT' || zKey === 'ALL' ? tBot : '';
-        botCen = zKey === 'CEN' || zKey === 'ALL' ? tBot : '';
-        botExt = zKey === 'EXT' || zKey === 'ALL' ? tBot : '';
-        stInt = zKey === 'INT' || zKey === 'ALL' ? tStir : '';
-        stCen = zKey === 'CEN' || zKey === 'ALL' ? tStir : '';
-        stExt = zKey === 'EXT' || zKey === 'ALL' ? tStir : '';
-        sideCell = zKey ? tSkin : '';
+      const ov = opts.cellOverrides;
+      if (ov) {
+        topInt = ov.topInt || '';
+        topCen = ov.topCen || '';
+        topExt = ov.topExt || '';
+        botInt = ov.botInt || '';
+        botCen = ov.botCen || '';
+        botExt = ov.botExt || '';
+        stInt = ov.stInt || '';
+        stCen = ov.stCen || '';
+        stExt = ov.stExt || '';
+        sideCell = ov.sideCell || '';
       } else if (usePlaneRebar) {
-        const zk = beamFlatMemberTableZoneColsKeyFromRow(run, ri, labMap, flatPl);
-        const hitInt = zk === 'INT' || zk === 'ALL';
-        const hitCen = zk === 'CEN' || zk === 'ALL';
-        const hitExt = zk === 'EXT' || zk === 'ALL';
+        const H = beamFlatMemberTableZoneColumnHitsFromRow(run, ri, labMap, flatPl, zoneEx);
+        const hitInt = H.hitInt;
+        const hitCen = H.hitCen;
+        const hitExt = H.hitExt;
         topInt = hitInt ? zb('int_top_bar', flatTx.top) : '';
         topCen = hitCen ? zb('cen_top_bar', flatTx.top) : '';
         topExt = hitExt ? zb('ext_top_bar', flatTx.top) : '';
@@ -5184,12 +5888,31 @@
         stInt = z(r.int_stirrup_bar);
         stCen = zb('cen_stirrup_bar', r.cen_stirrup_bar);
         stExt = zb('ext_stirrup_bar', r.ext_stirrup_bar);
-        sideCell = tSkin || z(r.side_bar);
+        sideCell = flatTx.skin || z(r.side_bar);
       }
       const nameCell = opts.nameCell;
       const rowNum = opts.rowNum;
+      const navWx = Number(opts.navWx);
+      const navWy = Number(opts.navWy);
       let h = '';
-      h += '<tr class="' + cls + '" data-extract-nav-row="' + ri + '">';
+      let trAttrs = ' class="' + cls + '" data-extract-nav-row="' + ri + '"';
+      if (Number.isFinite(navWx) && Number.isFinite(navWy)) {
+        trAttrs += ' data-extract-nav-wx="' + navWx.toFixed(3) + '" data-extract-nav-wy="' + navWy.toFixed(3) + '"';
+      }
+      if (isFiniteBBox4(opts.navBbox)) {
+        const _nb = opts.navBbox;
+        trAttrs +=
+          ' data-extract-nav-bbox="' +
+          [
+            Number(_nb[0]).toFixed(3),
+            Number(_nb[1]).toFixed(3),
+            Number(_nb[2]).toFixed(3),
+            Number(_nb[3]).toFixed(3),
+          ].join(',') +
+          '"';
+      }
+      if (opts.dimRowMark) trAttrs += ' title="' + escapeHtml(String(opts.dimRowMark)) + '"';
+      h += '<tr' + trAttrs + '>';
       h += '<td class="num">' + rowNum + '</td>';
       h += '<td>' + escapeHtml(nameCell) + '</td>';
       h += '<td>' + escapeHtml(z(r.type)) + '</td>';
@@ -5211,650 +5934,230 @@
       return h;
     }
 
-    if (useSrvFlatTable) {
-      // 서버 flat 슬랩행(부위별)을 "부재명 1행"으로 병합한다.
-      const picked = Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked : [];
-      const secByMark = {};
-      const zoneByMark = {};
-      const pickedCentersByMarkZone = {}; // mark -> zoneKey -> [[x,y],...]
-      const pickedEndFlagByMark = {}; // mark -> true if any picked zone text contains END
-      picked.forEach(function (p) {
-        const m = p && p.member;
-        const s = p && p.section;
-        const z = p && p.zone;
-        if (!m || !s) return;
-        const mt = String(m.text || '').trim();
-        const x = Number(s.x);
-        const y = Number(s.y);
-        if (!mt || ![x, y].every(Number.isFinite)) return;
-        (secByMark[mt] = secByMark[mt] || []).push([x, y]);
-        if (z && String(z.text || '').trim()) {
-          (zoneByMark[mt] = zoneByMark[mt] || []).push(String(z.text || '').trim());
-        }
-        const zt = String((z && z.text) || '').trim();
-        const zu = zt.toUpperCase();
-        if (zu.indexOf('END') >= 0) pickedEndFlagByMark[mt] = true;
-        let zk = '';
-        if (zu === 'INT') zk = 'INT';
-        else if (zu === 'CEN' || zu === 'CENTER') zk = 'CEN';
-        else if (zu === 'EXT' || zu === 'END') zk = 'EXT';
-        else if (zu === 'ALL') zk = 'ALL';
-        if (zk) {
-          pickedCentersByMarkZone[mt] = pickedCentersByMarkZone[mt] || {};
-          (pickedCentersByMarkZone[mt][zk] = pickedCentersByMarkZone[mt][zk] || []).push([x, y]);
-        }
+    /* === plane-first 부재별표 (동일 표시 부재명 → 1행 병합) ===
+       그룹 키 = beamMemberTableDisplayMarkStripDims(Name) 대문자.
+       셀 값은 그룹 내 도면 순서상 첫 plane 기준. Strip X 만 그룹 전체 centroid X 를 합친다. */
+    const planesAll = Array.isArray(run.beam_flat_merged_section_analysis)
+      ? run.beam_flat_merged_section_analysis
+      : [];
+    const planeOrder = beamFlatMemberTableOrderedPlaneIndexes(planesAll);
+    const usedServerRowIdx = new Set();
+    let displayRowNum = 0;
+    if (!planeOrder.length) {
+      html +=
+        '<tr><td colspan="' +
+        th.length +
+        '" class="extract-empty-cell" style="color:#6a737d;padding:12px">' +
+        '프론트뷰 단면(<code>beam_flat_merged_section_analysis</code>)이 비어 있어 표시할 부재가 없습니다. ' +
+        '도면 미리보기·선택 영역(원/직교선분)이 정상 로드됐는지 확인하세요.' +
+        '</td></tr>';
+    }
+    const mergeGroupOrder = [];
+    const mergeGroupMap = Object.create(null);
+    planeOrder.forEach(function (planeIdx) {
+      const flatPl = planesAll[planeIdx];
+      if (!flatPl) return;
+      const ri = beamFlatMatchServerRowIndexForPlane(rows, flatPl);
+      const nameCell =
+        beamFlatMemberTableNameForPlaneFirst(run, flatPl, ri, labMap) ||
+        (ri >= 0
+          ? beamMemberTableDisplayMarkStripBundledZone(beamCanvasMemberNameForMemberTable(run, ri, labMap))
+          : '(부재명 미상)');
+      const mergeKey = beamFlatMemberTableRowMergeKeyFromDisplayName(nameCell, planeIdx);
+      let gi = mergeGroupMap[mergeKey];
+      if (gi == null) {
+        gi = mergeGroupOrder.length;
+        mergeGroupMap[mergeKey] = gi;
+        mergeGroupOrder.push([]);
+      }
+      mergeGroupOrder[gi].push({
+        planeIdx: planeIdx,
+        flatPl: flatPl,
+        ri: ri,
+        nameCell: nameCell,
       });
-
-      // 화면(프론트)에서 이미 읽어낸 below_text_role_values를 단면 중심점으로 역참조해 표에 채운다(서버가 비었을 때 보강).
-      const planeAnalyses = Array.isArray(run.beam_flat_merged_section_analysis) ? run.beam_flat_merged_section_analysis : [];
-      function plCentroidXY(pl) {
-        if (!pl) return null;
-        let cx = pl.centroid && Number(pl.centroid.x);
-        let cy = pl.centroid && Number(pl.centroid.y);
-        if (![cx, cy].every(Number.isFinite)) {
-          const bb = pl.norm_bbox || pl.section_bbox;
-          if (bb && bb.length === 4 && bb.every((q) => Number.isFinite(Number(q)))) {
-            cx = (Number(bb[0]) + Number(bb[2])) * 0.5;
-            cy = (Number(bb[1]) + Number(bb[3])) * 0.5;
-          }
-        }
-        if (![cx, cy].every(Number.isFinite)) return null;
-        return [cx, cy];
-      }
-      function nearestPlaneAnalysisTo(x, y) {
-        let best = null;
-        let bestS = Infinity;
-        for (let i = 0; i < planeAnalyses.length; i++) {
-          const pl = planeAnalyses[i];
-          const c = plCentroidXY(pl);
-          if (!c) continue;
-          const dx = Math.abs(c[0] - x);
-          const dy = Math.abs(c[1] - y);
-          const s = dy + dx * 0.25;
-          if (s < bestS) {
-            bestS = s;
-            best = pl;
-          }
-        }
-        return best;
-      }
-      function textFromPlane(pl) {
-        const rv = (pl && pl.below_text_role_values) || {};
-        const chain = Array.isArray(pl && pl.below_text_chain_values) ? pl.below_text_chain_values : [];
-        let skinStr = String(rv['표피철근'] || '').trim();
-        if (!skinStr && chain.length >= 4) {
-          const c3 = String(chain[3] || '').trim();
-          if (c3 && !beamFlatLooksLikeMemberMarkText(c3) && beamFlatLooksLikeRebarValueText(c3)) skinStr = c3;
-        }
-        return {
-          top: String(rv['상부근'] || chain[0] || '').trim(),
-          bot: String(rv['하부근'] || chain[1] || '').trim(),
-          stir: String(rv['스트럽'] || chain[2] || '').trim(),
-          skin: skinStr,
-        };
-      }
-      function representativePlaneForMark(mark, a) {
-        const secs = secByMark[mark] || [];
-        if (secs.length) {
-          const x0 = Number(secs[0][0]);
-          const y0 = Number(secs[0][1]);
-          if ([x0, y0].every(Number.isFinite)) {
-            const pl0 = nearestPlaneAnalysisTo(x0, y0);
-            if (pl0) return pl0;
-          }
-        }
-        if (a && a.navN > 0) {
-          const pl1 = nearestPlaneAnalysisTo(a.navXSum / a.navN, a.navYSum / a.navN);
-          if (pl1) return pl1;
-        }
-        return null;
-      }
-
-      function normZoneKey(z) {
-        const u = String(z || '').trim().toUpperCase();
-        if (u === 'INT') return 'INT';
-        if (u === 'CEN' || u === 'CENTER') return 'CEN';
-        if (u === 'EXT' || u === 'END') return 'EXT';
-        if (u === 'ALL') return 'ALL';
-        return '';
-      }
-      function shouldMirrorEndToIntExt(zoneSet) {
-        // 규칙: END(EXT로 정규화)만 있고 INT가 없으면 END는 INT/EXT 둘 다를 의미
-        // (즉 INT가 비어있으면 EXT 값을 INT에도 복제) — CEN 유무와 무관
-        if (!zoneSet || !(zoneSet instanceof Set)) return false;
-        const hasE = zoneSet.has('EXT');
-        const hasI = zoneSet.has('INT');
-        const hasA = zoneSet.has('ALL');
-        return hasE && !hasI && !hasA;
-      }
-      function mergeCell(oldV, newV) {
-        const a = String(oldV || '').trim();
-        const b = String(newV || '').trim();
-        if (!a) return b;
-        if (!b) return a;
-        if (a === b) return a;
-        // 다중값은 중복 제거 후 ' / '로 합침
-        const parts = Array.from(new Set((a + ' / ' + b).split('/').map((s) => s.trim()).filter(Boolean)));
-        return parts.join(' / ');
-      }
-
-      const aggOrder = [];
-      const agg = {}; // mark -> {ri, widthMm, depthMm, topInt,..., sxSet, side, type, material}
-      serverFlatRows.forEach(function (fr, ii) {
-        const srcRi = Number(fr && fr.source_row_index);
-        const ri = Number.isFinite(srcRi) ? srcRi : ii;
-        const r = rows[ri] || {};
-        const mark = String((fr && fr.member_mark_text) || '').trim() || beamCanvasMemberNameForMemberTable(run, ri, labMap).trim();
-        if (!mark) return;
-        const zKey = normZoneKey(fr && fr.member_zone_text);
-        const srvPl = {
-          below_text_role_values: fr && fr.below_text_role_values,
-          below_text_chain_values: fr && fr.below_text_chain_values,
-        };
-        let tx = beamFlatTextValuesFromPlane(srvPl);
-        const txFromServer = !!(tx.top || tx.bot || tx.stir || tx.skin);
-        // 서버값이 비면, 화면에서 이미 읽힌 단면 텍스트(pl.below_text_role_values)로 보강
-        if (!(tx.top || tx.bot || tx.stir || tx.skin)) {
-          const secList = secByMark[mark] || [];
-          if (secList.length) {
-            // mark에 대해 가장 가까운 단면(pl) 하나를 고르고 그 텍스트를 사용(부위별로 값이 다르면 / 로 병합됨)
-            const s0 = secList[0];
-            const pl = nearestPlaneAnalysisTo(Number(s0[0]), Number(s0[1]));
-            const tx2 = textFromPlane(pl);
-            if (tx2.top || tx2.bot || tx2.stir || tx2.skin) tx = tx2;
-          }
-        }
-        const txFromFrontend = !txFromServer && !!(tx.top || tx.bot || tx.stir || tx.skin);
-        const sx = fr && fr.strip_x != null && fr.strip_x !== '' ? String(fr.strip_x) : '';
-
-        if (!agg[mark]) {
-          agg[mark] = {
-            ri: ri,
-            widthMm: fr && fr.width_mm,
-            depthMm: fr && fr.depth_mm,
-            type: r.type,
-            material: r.material,
-            topInt: '',
-            topCen: '',
-            topExt: '',
-            botInt: '',
-            botCen: '',
-            botExt: '',
-            stInt: '',
-            stCen: '',
-            stExt: '',
-            side: '',
-            sxSet: new Set(),
-            navXSum: 0,
-            navYSum: 0,
-            navN: 0,
-            // 디버그 집계
-            zSeen: new Set(),
-            zBlank: new Set(),
-            srcServer: 0,
-            srcFrontend: 0,
-            srcNone: 0,
-            pickedZSeen: new Set(),
-            // 입력 추적(왜 한 mark가 여러 값으로 합쳐지는지)
-            inServer: [],
-            inPicked: [],
-            inSrcRows: new Set(),
-            dropped: [],
-          };
-          aggOrder.push(mark);
-          const pts = secByMark[mark] || [];
-          pts.forEach(function (pt) {
-            const x = Number(pt[0]);
-            const y = Number(pt[1]);
-            if (![x, y].every(Number.isFinite)) return;
-            agg[mark].navXSum += x;
-            agg[mark].navYSum += y;
-            agg[mark].navN += 1;
-          });
-        }
-        const a = agg[mark];
-        a.inSrcRows.add(String(ri));
-        // server row의 "단면 중심 X" (가능하면 section_geometry bbox 중심) — picked의 section.x와 같은 좌표계라 매칭에 안정적
-        let repX = Number(fr && fr.strip_x);
-        try {
-          const sg = fr && fr.section_geometry;
-          const bb =
-            sg &&
-            (sg.search_bbox ||
-              sg.search_bbox_loose ||
-              (sg.cluster_geometry && sg.cluster_geometry.cluster_bbox) ||
-              null);
-          if (bb && bb.length >= 4 && bb.every((q) => Number.isFinite(Number(q)))) {
-            repX = (Number(bb[0]) + Number(bb[2])) * 0.5;
-          }
-        } catch (e) {}
-        a.inServer.push({
-          i: ii,
-          source_row_index: ri,
-          slab_index: fr && fr.slab_index,
-          zone_raw: fr && fr.member_zone_text,
-          zone_key: zKey,
-          strip_x: fr && fr.strip_x,
-          rep_x: repX,
-          width_mm: fr && fr.width_mm,
-          depth_mm: fr && fr.depth_mm,
-          tx_src: txFromServer ? 'server' : txFromFrontend ? 'frontend' : 'none',
-          tx_top: tx.top,
-          tx_bot: tx.bot,
-          tx_stir: tx.stir,
-          tx_skin: tx.skin,
-        });
-        if (zKey) a.zSeen.add(zKey);
-        else a.zBlank.add('(zone blank)');
-        if (txFromServer) a.srcServer += 1;
-        else if (txFromFrontend) a.srcFrontend += 1;
-        else a.srcNone += 1;
-        if (sx) a.sxSet.add(sx);
-        // 폭/춤은 첫 유효값 우선
-        if (!a.widthMm && fr && fr.width_mm) a.widthMm = fr.width_mm;
-        if (!a.depthMm && fr && fr.depth_mm) a.depthMm = fr.depth_mm;
-
-        // NOTE: 실제 칼럼 채우기는 picked 중심에 가장 가까운 server row를 고른 뒤(2차 패스) 수행
+    });
+    mergeGroupOrder.forEach(function (items) {
+      if (!items || !items.length) return;
+      items.forEach(function (it) {
+        it.hits = beamFlatMemberTableZoneHitsForPlaneInGroup(it.flatPl);
       });
-
-      // picked 기반으로 "부위 집합" 보강 + 누락된 부위 텍스트를 단면(pl)에서 채움
-      function applyTxToAgg(a, zone, tx) {
-        if (!a || !zone || !tx) return;
-        function mergeTo(z) {
-          if (z === 'INT') {
-            a.topInt = mergeCell(a.topInt, tx.top);
-            a.botInt = mergeCell(a.botInt, tx.bot);
-            a.stInt = mergeCell(a.stInt, tx.stir);
-          } else if (z === 'CEN') {
-            a.topCen = mergeCell(a.topCen, tx.top);
-            a.botCen = mergeCell(a.botCen, tx.bot);
-            a.stCen = mergeCell(a.stCen, tx.stir);
-          } else if (z === 'EXT') {
-            a.topExt = mergeCell(a.topExt, tx.top);
-            a.botExt = mergeCell(a.botExt, tx.bot);
-            a.stExt = mergeCell(a.stExt, tx.stir);
-          }
+      beamFlatMemberTablePromoteEndHitsForGroup(items);
+      const primary = items[0];
+      const flatPl = primary.flatPl;
+      const planeIdx = primary.planeIdx;
+      let repRi = -1;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].ri >= 0) {
+          repRi = items[i].ri;
+          break;
         }
-        if (zone === 'ALL') {
-          mergeTo('INT');
-          mergeTo('CEN');
-          mergeTo('EXT');
-        } else {
-          mergeTo(zone);
-        }
-        // Side Bar는 부재별표/엑셀에서 채우지 않음(요청사항)
       }
-
-      aggOrder.forEach(function (mark) {
-        const a = agg[mark];
-        if (!a) return;
-        const mz = pickedCentersByMarkZone[mark] || {};
-        // picked 입력(연결된 단면 중심/부위) 추적
-        try {
-          const pz = mz || {};
-          Object.keys(pz).forEach(function (zk) {
-            const pts = pz[zk] || [];
-            pts.forEach(function (pt) {
-              const x = Number(pt[0]);
-              const y = Number(pt[1]);
-              if (![x, y].every(Number.isFinite)) return;
-              a.inPicked.push({ zone_key: zk, x: x, y: y });
-            });
-          });
-        } catch (e) {}
-        Object.keys(mz).forEach(function (zk) {
-          a.pickedZSeen.add(zk);
-        });
-        // server가 놓친 zone도 화면(picked) 기준으로 zSeen에 포함
-        a.pickedZSeen.forEach(function (zk) {
-          if (!a.zSeen.has(zk)) a.zSeen.add(zk);
-        });
-
-        // 1) server flat rows(슬랩행) 중, picked 중심에 가장 가까운 것만 zone별로 채택해 칼럼을 채운다.
-        //    (화면에서 1개만 잡히는데 표에서 값이 섞이는 문제 방지)
-        a.topInt = '';
-        a.topCen = '';
-        a.topExt = '';
-        a.botInt = '';
-        a.botCen = '';
-        a.botExt = '';
-        a.stInt = '';
-        a.stCen = '';
-        a.stExt = '';
-        a.side = '';
-        a._srcByZone = { INT: '', CEN: '', EXT: '', ALL: '' };
-
-        function targetXForZone(zone) {
-          const pts = (mz && mz[zone]) || [];
-          if (pts.length && Number.isFinite(Number(pts[0][0]))) return Number(pts[0][0]);
-          const all = secByMark[mark] || [];
-          if (all.length && Number.isFinite(Number(all[0][0]))) return Number(all[0][0]);
-          return NaN;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].ri >= 0) usedServerRowIdx.add(items[i].ri);
+      }
+      const r = (repRi >= 0 ? rows[repRi] : null) || {};
+      let dupAny = false;
+      for (let i = 0; i < items.length; i++) {
+        if (items[i].ri >= 0 && dup.has(items[i].ri)) {
+          dupAny = true;
+          break;
         }
-        function bestServerForZone(zone) {
-          const tx = targetXForZone(zone);
-          const cand = (a.inServer || []).filter((it) => String(it.zone_key || '') === zone || (zone === 'EXT' && String(it.zone_key || '') === 'EXT') || (zone === 'CEN' && String(it.zone_key || '') === 'CEN') || (zone === 'INT' && String(it.zone_key || '') === 'INT'));
-          if (!cand.length) return null;
-          let best = null;
-          let bestDx = Infinity;
-          for (let i = 0; i < cand.length; i++) {
-            const sx = Number(cand[i].rep_x != null ? cand[i].rep_x : cand[i].strip_x);
-            if (!Number.isFinite(sx) || !Number.isFinite(tx)) continue;
-            const dx = Math.abs(sx - tx);
-            if (dx < bestDx) {
-              bestDx = dx;
-              best = cand[i];
-            }
-          }
-          // targetX가 없으면 첫 후보
-          return best || cand[0];
-        }
-        function applyPickedPlane(zone) {
-          const pts = (mz && mz[zone]) || [];
-          if (!pts.length) return false;
-          const pl = nearestPlaneAnalysisTo(Number(pts[0][0]), Number(pts[0][1]));
-          const tx = textFromPlane(pl);
-          if (!tx || !(tx.top || tx.bot || tx.stir || tx.skin)) return false;
-          applyTxToAgg(a, zone, tx);
-          a._srcByZone[zone] = 'plane';
-          return true;
-        }
-        function applySrvRow(zone) {
-          const it = bestServerForZone(zone);
-          if (!it) return false;
-          const tx = {
-            top: String(it.tx_top || '').trim(),
-            bot: String(it.tx_bot || '').trim(),
-            stir: String(it.tx_stir || '').trim(),
-            skin: String(it.tx_skin || '').trim(),
-          };
-          if (!(tx.top || tx.bot || tx.stir || tx.skin)) return false;
-          applyTxToAgg(a, zone, tx);
-          a._srcByZone[zone] = 'serverRow';
-          return true;
-        }
-        // ALL은 server row 자체가 있을 수 있음(그 경우 3칸 모두 채움)
-        const itAll = (a.inServer || []).find((it) => String(it.zone_key || '') === 'ALL');
-        if (itAll) {
-          // 화면(plane) 우선, 없으면 server ALL 사용
-          if (!applyPickedPlane('ALL')) {
-            applyTxToAgg(
-              a,
-              'ALL',
-              {
-                top: String(itAll.tx_top || '').trim(),
-                bot: String(itAll.tx_bot || '').trim(),
-                stir: String(itAll.tx_stir || '').trim(),
-                skin: String(itAll.tx_skin || '').trim(),
-              },
-            );
-            a._srcByZone.ALL = 'serverRow';
-          }
-        } else {
-          // 화면(pl) 우선, 없으면 server row fallback
-          if (!applyPickedPlane('INT')) applySrvRow('INT');
-          if (!applyPickedPlane('CEN')) applySrvRow('CEN');
-          if (!applyPickedPlane('EXT')) applySrvRow('EXT');
-        }
-
-        // 2) 누락된 zone 값은 picked section 중심 근처 planeAnalysis 텍스트로 채움
-        function maybeFill(zone) {
-          if (zone === 'INT' && (a.topInt || a.botInt || a.stInt)) return;
-          if (zone === 'CEN' && (a.topCen || a.botCen || a.stCen)) return;
-          if (zone === 'EXT' && (a.topExt || a.botExt || a.stExt)) return;
-          const pts = (mz && mz[zone]) || [];
-          if (!pts.length) return;
-          let bestTx = null;
-          for (let i = 0; i < pts.length; i++) {
-            const pl = nearestPlaneAnalysisTo(Number(pts[i][0]), Number(pts[i][1]));
-            const tx = textFromPlane(pl);
-            if (tx && (tx.top || tx.bot || tx.stir || tx.skin)) {
-              bestTx = tx;
-              break;
-            }
-          }
-          if (bestTx) applyTxToAgg(a, zone, bestTx);
-        }
-        maybeFill('INT');
-        maybeFill('CEN');
-        maybeFill('EXT');
-
-        // 규칙: CEN+END(EXT)만 있을 때 END는 INT/EXT 모두
-        if (pickedEndFlagByMark[mark] && shouldMirrorEndToIntExt(a.zSeen)) {
-          if (!a.topInt && !a.botInt && !a.stInt) {
-            a.topInt = mergeCell(a.topInt, a.topExt);
-            a.botInt = mergeCell(a.botInt, a.botExt);
-            a.stInt = mergeCell(a.stInt, a.stExt);
-            if (!a._srcByZone.INT) a._srcByZone.INT = 'mirroredEND';
-          }
-        }
+      }
+      displayRowNum += 1;
+      const nameCell = primary.nameCell;
+      const planeC = beamFlatPlaneCentroidXY(flatPl);
+      const navWx = planeC && Number.isFinite(Number(planeC[0])) ? Number(planeC[0]) : null;
+      const navWy = planeC && Number.isFinite(Number(planeC[1])) ? Number(planeC[1]) : null;
+      const sxCell = beamFlatMemberTableMergedStripXContentForPlanes(items.map(function (it) {
+        return it.flatPl;
+      }));
+      const navBbox = beamFlatMemberTableNavBboxForGroup(items, run);
+      const planeIdxList = items
+        .map(function (it) {
+          return it.planeIdx;
+        })
+        .join(',');
+      const cellOv = beamFlatMemberTableComputeMergedCells(items, formatBeamExtractDisplay);
+      const zoneSummary = items
+        .map(function (it) {
+          const lbl = String((it.flatPl && it.flatPl.member_zone_text) || '').replace(/\s+/g, ' ').trim() || '(zone?)';
+          const h = it.hits || {};
+          const ice = (h.hitInt ? 'I' : '-') + (h.hitCen ? 'C' : '-') + (h.hitExt ? 'E' : '-');
+          const tag = it.endPromotedToBoth ? '*END→BOTH' : '';
+          return '#' + it.planeIdx + ':' + lbl + ':' + ice + tag;
+        })
+        .join(' | ');
+      pushBeamMemberTableForwardTsvRow({
+        displayRowNum: displayRowNum,
+        ri: repRi,
+        zoneEntry: null,
+        flatPl: flatPl,
+        nameCell: nameCell,
+        planeIndex: planeIdx,
+        mergedPlaneCount: items.length,
+        mergedPlaneIndexes: planeIdxList,
+        mergedZoneSummary: zoneSummary,
+        mergedHits: { hitInt: cellOv.hitInt, hitCen: cellOv.hitCen, hitExt: cellOv.hitExt },
       });
-
-      aggOrder.forEach(function (mark, oi) {
-        const a = agg[mark];
-        if (!a) return;
-        const ri = a.ri;
-        // oneRowHtml은 isServerFlatRow=true일 때 zoneKey 기준으로 한 칼럼만 채우는 구조라
-        // 병합 행은 "서버행이지만 이미 칼럼이 완성된 상태"로 직접 그린다.
-        const r = rows[ri] || {};
-        const cls = [dup.has(ri) ? 'extract-dup-row' : '', 'extract-nav-target'].filter(Boolean).join(' ');
-        const z = (x) => (x != null && x !== '' ? String(x) : '');
-        const sx = Array.from(a.sxSet.values()).filter(Boolean).join(', ');
-        const navWx = a.navN > 0 ? a.navXSum / a.navN : NaN;
-        const navWy = a.navN > 0 ? a.navYSum / a.navN : NaN;
-        const navAttr =
-          [navWx, navWy].every(Number.isFinite)
-            ? ' data-extract-nav-wx="' + String(navWx) + '" data-extract-nav-wy="' + String(navWy) + '"'
-            : '';
+      html += oneRowHtml({
+        ri: repRi,
+        rowNum: displayRowNum,
+        nameCell: nameCell,
+        widthMm: r.width_mm,
+        depthMm: r.depth_mm,
+        flatPl: flatPl,
+        sx: sxCell,
+        zoneEntry: undefined,
+        navWx: navWx,
+        navWy: navWy,
+        navBbox: navBbox,
+        dupAny: dupAny,
+        cellOverrides: cellOv,
+        dimRowMark:
+          'planes [' + planeIdxList + '] n=' + items.length +
+          (repRi >= 0 ? ' · rep server row ' + (repRi + 1) : ' · 서버 행 미매칭') +
+          (zoneSummary ? '\nzones: ' + zoneSummary : ''),
+      });
+      /* dim mismatch 표: 부재별표 그룹 안 plane 마다 1행 — 캔버스 빨간 단면 박스(각 plane W·H 라벨)와 1:1 대응 */
+      if (planesAll.length) {
         const pri0 = beamFlatGetMmPrimaryPreference();
-        let wShow = a.widthMm;
-        let dShow = a.depthMm;
-        const plRep = representativePlaneForMark(mark, a);
-        if (plRep) {
-          const bucks = beamFlatExtractMmBucketsFromPlane(plRep);
-          const rMm = beamFlatResolveMmFromBuckets(bucks, pri0);
-          if (rMm.mm && Number.isFinite(rMm.mm.width_mm) && Number.isFinite(rMm.mm.depth_mm)) {
-            wShow = rMm.mm.width_mm;
-            dShow = rMm.mm.depth_mm;
-          }
-          const tM = bucks.textMm;
-          const dM = bucks.dimMm;
-          const oM = bucks.outlineMm;
-          const nHave = (tM ? 1 : 0) + (dM ? 1 : 0) + (oM ? 1 : 0);
-          if (nHave >= 2) {
-            let conflict = false;
-            const mmTri = [];
-            if (tM) mmTri.push({ mm: tM });
-            if (dM) mmTri.push({ mm: dM });
-            if (oM) mmTri.push({ mm: oM });
-            for (let xi = 0; xi < mmTri.length && !conflict; xi++) {
-              for (let yi = xi + 1; yi < mmTri.length; yi++) {
-                if (!beamFlatMmPairEqual(mmTri[xi].mm, mmTri[yi].mm, 12)) {
-                  conflict = true;
-                  break;
-                }
-              }
-            }
-            if (conflict) {
-              const rPick = beamFlatResolveMmFromBuckets(bucks, pri0);
-              const srcLab =
-                rPick.used === 'text'
-                  ? '텍스트·표기'
-                  : rPick.used === 'dim'
-                    ? '치수선'
-                    : rPick.used === 'outline'
-                      ? '단면 W×H'
-                      : '';
-              const notes = [];
-              if (tM && dM && !beamFlatMmPairEqual(tM, dM, 12)) notes.push('텍스트≠치수선');
-              if (tM && oM && !beamFlatMmPairEqual(tM, oM, 12)) notes.push('텍스트≠단면');
-              if (dM && oM && !beamFlatMmPairEqual(dM, oM, 12)) notes.push('치수선≠단면');
-              dimMismatchRows.push({
-                mark: mark,
-                colText: tM ? beamFlatFmtMmPair(tM) : bucks.textSnippet || '-',
-                colDim: dM ? beamFlatFmtMmPair(dM) : bucks.dimSnippet || '-',
-                colOut: oM ? beamFlatFmtMmPair(oM) : bucks.outlineSnippet || '-',
-                pickedStr: rPick.mm ? beamFlatFmtMmPair(rPick.mm) : '-',
-                pickedSrc: srcLab,
-                note: notes.join(' · '),
-              });
-            }
-          }
-        }
-        html += '<tr class="' + cls + '" data-extract-nav-row="' + ri + '"' + navAttr + ' title="클릭하면 매칭된 단면으로 이동">';
-        html += '<td class="num">' + (oi + 1) + '</td>';
-        html += '<td>' + escapeHtml(mark) + '</td>';
-        html += '<td>' + escapeHtml(z(r.type)) + '</td>';
-        html += '<td>' + escapeHtml(z(r.material)) + '</td>';
-        html += '<td>' + escapeHtml(z(wShow)) + '</td>';
-        html += '<td>' + escapeHtml(z(dShow)) + '</td>';
-        html += '<td>' + escapeHtml(a.topInt) + '</td>';
-        html += '<td>' + escapeHtml(a.topCen) + '</td>';
-        html += '<td>' + escapeHtml(a.topExt) + '</td>';
-        html += '<td>' + escapeHtml(a.botInt) + '</td>';
-        html += '<td>' + escapeHtml(a.botCen) + '</td>';
-        html += '<td>' + escapeHtml(a.botExt) + '</td>';
-        html += '<td>' + escapeHtml(a.stInt) + '</td>';
-        html += '<td>' + escapeHtml(a.stCen) + '</td>';
-        html += '<td>' + escapeHtml(a.stExt) + '</td>';
-        html += '<td></td>';
-        html += '<td>' + escapeHtml(sx) + '</td>';
-        html += '</tr>';
-
-        // 디버그: 비어있는 칼럼 원인 요약(부위 미존재 vs 텍스트 미검출)
-        const seen = Array.from(a.zSeen.values()).join(',') || '-';
-        const pickedSeen = Array.from(a.pickedZSeen.values()).join(',') || '-';
-        const blankZ = Array.from(a.zBlank.values()).join(',') || '-';
-        const miss = [];
-        if (!a.topInt && !a.botInt && !a.stInt) miss.push('INT');
-        if (!a.topCen && !a.botCen && !a.stCen) miss.push('CEN');
-        if (!a.topExt && !a.botExt && !a.stExt) miss.push('EXT');
-        dbgLines.push(
-          [
-            String(oi + 1),
-            mark,
-            'zones_seen(server+picked)=' + seen,
-            'zones_picked=' + pickedSeen,
-            'zone_blank=' + blankZ,
-            'text_src(server/frontend/none)=' + a.srcServer + '/' + a.srcFrontend + '/' + a.srcNone,
-            'empty_cols=' + (miss.length ? miss.join(',') : '-'),
-          ].join('\t'),
-        );
-        if (a._srcByZone) {
-          dbgLines.push(
-            '  - filled_by: INT=' +
-              String(a._srcByZone.INT || '-') +
-              ', CEN=' +
-              String(a._srcByZone.CEN || '-') +
-              ', EXT=' +
-              String(a._srcByZone.EXT || '-') +
-              ', ALL=' +
-              String(a._srcByZone.ALL || '-'),
-          );
-        }
-
-        // 입력 상세(왜 1개로 보이는데 표에서는 여러 값으로 합쳐졌는지)
-        // 너무 길어지지 않게 상위 N개만 표시
-        const srvN = a.inServer.length;
-        const pickN = a.inPicked.length;
-        const srcRowN = a.inSrcRows.size;
-        if (srvN > 1 || pickN > 1 || srcRowN > 1) {
-          dbgLines.push('  - inputs: server_rows=' + srvN + ', picked_centers=' + pickN + ', source_row_indices=' + srcRowN);
-          if (srcRowN > 1) {
-            dbgLines.push('    - source_row_indices: ' + Array.from(a.inSrcRows.values()).join(', '));
-          }
-          if (a.dropped && a.dropped.length) {
-            const showD = a.dropped.slice(0, 6);
-            dbgLines.push('    - dropped_server_rows: ' + a.dropped.length);
-            showD.forEach(function (it) {
-              dbgLines.push(
-                '    - drop[' +
-                  it.i +
-                  '] ri=' +
-                  it.source_row_index +
-                  ' slab=' +
-                  it.slab_index +
-                  ' zone=' +
-                  String(it.zone_raw || '-') +
-                  ' sx=' +
-                  String(it.strip_x || '-') +
-                  ' dist=' +
-                  (Number.isFinite(Number(it.dist_to_picked)) ? Number(it.dist_to_picked).toFixed(1) : '-'),
-              );
-            });
-            if (a.dropped.length > showD.length) dbgLines.push('    - ... dropped more: ' + (a.dropped.length - showD.length));
-          }
-          const showSrv = a.inServer.slice(0, 6);
-          showSrv.forEach(function (it) {
-            dbgLines.push(
-              '    - srv[' +
-                it.i +
-                '] ri=' +
-                it.source_row_index +
-                ' slab=' +
-                it.slab_index +
-                ' zone=' +
-                String(it.zone_raw || '-') +
-                ' (' +
-                String(it.zone_key || '-') +
-                ')' +
-                ' sx=' +
-                String(it.strip_x || '-') +
-                ' repX=' +
-                (Number.isFinite(Number(it.rep_x)) ? Number(it.rep_x).toFixed(2) : '-') +
-                ' txsrc=' +
-                it.tx_src +
-                ' top=' +
-                String(it.tx_top || '-') +
-                ' bot=' +
-                String(it.tx_bot || '-') +
-                ' stir=' +
-                String(it.tx_stir || '-') ,
-            );
+        items.forEach(function (it) {
+          const pl = it && it.flatPl;
+          if (!pl) return;
+          const bucks = beamFlatExtractMmBucketsFromPlane(pl);
+          const t = bucks.textMm;
+          const d = bucks.dimMm;
+          const o = bucks.outlineMm;
+          const have = (t ? 1 : 0) + (d ? 1 : 0) + (o ? 1 : 0);
+          if (have < 2) return;
+          const conflict =
+            (t && d && !beamFlatMmPairEqual(t, d, 12)) ||
+            (t && o && !beamFlatMmPairEqual(t, o, 12)) ||
+            (d && o && !beamFlatMmPairEqual(d, o, 12));
+          if (!conflict) return;
+          const rPick = beamFlatResolveMmFromBuckets(bucks, pri0);
+          const srcLab =
+            rPick.used === 'text'
+              ? '텍스트·표기'
+              : rPick.used === 'dim'
+                ? '치수선'
+                : rPick.used === 'outline'
+                  ? '단면 W×H'
+                  : '';
+          const notes = [];
+          if (t && d && !beamFlatMmPairEqual(t, d, 12)) notes.push('텍스트≠치수선');
+          if (t && o && !beamFlatMmPairEqual(t, o, 12)) notes.push('텍스트≠단면');
+          if (d && o && !beamFlatMmPairEqual(d, o, 12)) notes.push('치수선≠단면');
+          dimMismatchRows.push({
+            mark: (nameCell || String((pl && pl.member_mark_text) || '').trim() || '(부호?)') +
+              ' · 단면 #' + (Number(it.planeIdx) + 1),
+            colText: t ? beamFlatFmtMmPair(t) : (bucks.textSnippet || '-'),
+            colDim: d ? beamFlatFmtMmPair(d) : (bucks.dimSnippet || '-'),
+            colOut: o ? beamFlatFmtMmPair(o) : (bucks.outlineSnippet || '-'),
+            pickedStr: rPick.mm ? beamFlatFmtMmPair(rPick.mm) : '-',
+            pickedSrc: srcLab,
+            note: notes.join(' · '),
           });
-          if (srvN > showSrv.length) dbgLines.push('    - ... srv more: ' + (srvN - showSrv.length));
-          const showPk = a.inPicked.slice(0, 6);
-          showPk.forEach(function (p) {
-            dbgLines.push('    - picked zone=' + p.zone_key + ' sec=(' + p.x.toFixed(2) + ',' + p.y.toFixed(2) + ')');
-          });
-          if (pickN > showPk.length) dbgLines.push('    - ... picked more: ' + (pickN - showPk.length));
-        }
-      });
-    } else {
-      rows.forEach((r, ri) => {
-        const flatPl = beamFlatAnalysisForExtractRow(run, ri, labMap);
-        const mergedPlaneN0 = Array.isArray(run.beam_flat_merged_section_analysis)
-          ? run.beam_flat_merged_section_analysis.length
-          : 0;
-        const nameCell =
-          mergedPlaneN0 > 0
-            ? beamFlatMemberTableNameForFlatRow(run, ri, labMap, flatPl)
-            : beamCanvasMemberNameForMemberTable(run, ri, labMap);
-        const flatTxSrv = beamFlatTextValuesFromPlane(flatPl);
-        html += oneRowHtml({
-          ri: ri,
-          rowNum: ri + 1,
-          nameCell: nameCell,
-          widthMm: r.width_mm,
-          depthMm: r.depth_mm,
-          flatTxSrv: flatTxSrv,
-          sx: null,
         });
+      }
+    });
+    /* 매칭되지 않은 서버 일람행 — 디버그 패널에만 별도 라인으로 노출(표에는 그리지 않는다). */
+    const unmatchedServerRowsForDbg = [];
+    for (let i = 0; i < rows.length; i++) {
+      if (usedServerRowIdx.has(i)) continue;
+      const rr = rows[i] || {};
+      const lbl =
+        beamMemberTableDisplayMarkStripDims(String(rr.mark != null ? rr.mark : rr.name || '').trim()) ||
+        '(부호없음)';
+      unmatchedServerRowsForDbg.push({ ri: i, mark: lbl });
+    }
+    if (unmatchedServerRowsForDbg.length) {
+      dbgLines.push('');
+      dbgLines.push(
+        '[plane 미매칭 서버 일람행] ' + unmatchedServerRowsForDbg.length + '개 (부재별표에는 미표시)',
+      );
+      unmatchedServerRowsForDbg.forEach(function (e) {
+        dbgLines.push('  - ri=' + e.ri + ' mark=' + e.mark);
       });
     }
+    dbgLines.push('');
+    dbgLines.push(
+      '[plane-first 요약] planes=' +
+        planesAll.length +
+        ' tableRows(merged)=' +
+        displayRowNum +
+        ' mergeGroups=' +
+        mergeGroupOrder.length +
+        ' unmatchedServerRows=' +
+        unmatchedServerRowsForDbg.length,
+    );
     html += '</tbody></table></div>';
     // 디버그 패널 채우기(부재별표 아래)
     try {
       window.__lastBeamMemberTableDebugPlain = dbgLines.join('\n');
+      window.__lastBeamMemberTableForwardDebugPlain = forwardDbgLines.join('\n');
       const pre = $('extractBeamMemberTableDebugPre');
+      const preFwd = $('extractBeamMemberTableForwardDebugPre');
       const wrap = $('extractBeamMemberTableDebugWrap');
       const btn = $('btnBeamMemberTableDebugCopy');
+      const btnFwd = $('btnBeamMemberTableForwardDebugCopy');
       if (wrap && pre) {
         pre.textContent = window.__lastBeamMemberTableDebugPlain || '';
-        wrap.style.display = pre.textContent ? 'block' : 'none';
+      }
+      if (preFwd) {
+        preFwd.textContent = window.__lastBeamMemberTableForwardDebugPlain || '';
+      }
+      if (wrap) {
+        const showDbg = !!(pre && pre.textContent);
+        const showFwd = !!(preFwd && preFwd.textContent);
+        wrap.style.display = showDbg || showFwd ? 'block' : 'none';
       }
       if (btn) {
         btn.style.display = window.__lastBeamMemberTableDebugPlain ? '' : 'none';
+      }
+      if (btnFwd) {
+        btnFwd.style.display = window.__lastBeamMemberTableForwardDebugPlain ? '' : 'none';
       }
     } catch (e) {}
     return { html: html, dimMismatchRows: dimMismatchRows };
@@ -6073,7 +6376,6 @@
   function buildBeamVerticalTidyAoa(rows, validation, runOpt) {
     const v = validation || {};
     const strips = v.beam_vertical_strips || [];
-    const serverFlatRows = Array.isArray(v.beam_flat_member_table_rows) ? v.beam_flat_member_table_rows : [];
     const runB =
       runOpt && typeof runOpt === 'object'
         ? runOpt
@@ -6107,331 +6409,85 @@
       'Strip_X',
     ];
     const aoa = [h];
-    function beamFlatTextFromServerRow(fr) {
-      const rv = (fr && fr.below_text_role_values) || {};
-      const chain = Array.isArray(fr && fr.below_text_chain_values) ? fr.below_text_chain_values : [];
-      let skinStr = String(rv['표피철근'] || '').trim();
-      if (!skinStr && chain.length >= 4) {
-        const c3 = String(chain[3] || '').trim();
-        if (c3 && typeof beamFlatLooksLikeMemberMarkText === 'function' && typeof beamFlatLooksLikeRebarValueText === 'function') {
-          if (!beamFlatLooksLikeMemberMarkText(c3) && beamFlatLooksLikeRebarValueText(c3)) skinStr = c3;
-        } else {
-          if (c3) skinStr = c3;
-        }
-      }
-      return {
-        top: String(rv['상부근'] || chain[0] || '').trim(),
-        bot: String(rv['하부근'] || chain[1] || '').trim(),
-        stir: String(rv['스트럽'] || chain[2] || '').trim(),
-        skin: skinStr,
-      };
-    }
-
-    if (serverFlatRows.length && beamMemberTableUseServerFlatRows) {
-      function normZoneKey(z) {
-        const u = String(z || '').trim().toUpperCase();
-        if (u === 'INT') return 'INT';
-        if (u === 'CEN' || u === 'CENTER') return 'CEN';
-        if (u === 'EXT' || u === 'END') return 'EXT';
-        if (u === 'ALL') return 'ALL';
-        return '';
-      }
-      function shouldMirrorEndToIntExt(a) {
-        // 엑셀도 동일 규칙: END(EXT)만 있고 INT가 없으면 END는 INT/EXT 모두 의미
-        if (!a || !a.zSeen) return false;
-        const s = a.zSeen;
-        return s.has('EXT') && !s.has('INT') && !s.has('ALL');
-      }
-      function mergeCell(oldV, newV) {
-        const a = String(oldV || '').trim();
-        const b = String(newV || '').trim();
-        if (!a) return b;
-        if (!b) return a;
-        if (a === b) return a;
-        const parts = Array.from(new Set((a + ' / ' + b).split('/').map((s) => s.trim()).filter(Boolean)));
-        return parts.join(' / ');
-      }
-      const order = [];
-      const agg = {}; // mark -> aggregated
-      serverFlatRows.forEach(function (fr, ii) {
-        const srcRi = Number(fr && fr.source_row_index);
-        const ri = Number.isFinite(srcRi) ? srcRi : ii;
-        const r = (rows && rows[ri]) || {};
+    const labMapX = buildPreviewLabelEidMap();
+    let dispRow = 0;
+    rows.forEach((r, ri) => {
+      const zones = Array.isArray(r.beam_section_geometry_zones) ? r.beam_section_geometry_zones : [];
+      const slots = zones.length > 0 ? zones : [null];
+      slots.forEach(function (zoneEntry) {
+        dispRow += 1;
+        const sx = zoneEntry
+          ? beamFlatMemberTableStripXContent(fauxRun, ri, zoneEntry, strips)
+          : formatBeamMergedStripXs(r, strips);
         const z = (x) => (x != null && x !== '' ? x : '');
-        const mark = String((fr && fr.member_mark_text) || '').trim() || beamCanvasMemberNameForMemberTable(fauxRun, ri).trim();
-        if (!mark) return;
-        const zKey = normZoneKey(fr && fr.member_zone_text);
-        const tx = beamFlatTextFromServerRow(fr);
-        const sx =
-          fr && fr.strip_x != null && fr.strip_x !== '' ? String(fr.strip_x) : formatBeamMergedStripXs(r, strips);
-        if (!agg[mark]) {
-          agg[mark] = {
-            ri: ri,
-            type: z(r.type),
-            material: z(r.material),
-            widthMm: z(fr && fr.width_mm),
-            depthMm: z(fr && fr.depth_mm),
-            topInt: '',
-            topCen: '',
-            topExt: '',
-            botInt: '',
-            botCen: '',
-            botExt: '',
-            stInt: '',
-            stCen: '',
-            stExt: '',
-            side: '',
-            sxSet: new Set(),
-            zSeen: new Set(),
-          };
-          order.push(mark);
+        const zb = (key, val) => formatBeamExtractDisplay(key, val);
+        const mergedPlaneN = Array.isArray(fauxRun.beam_flat_merged_section_analysis)
+          ? fauxRun.beam_flat_merged_section_analysis.length
+          : 0;
+        let flatPl = beamFlatAnalysisForExtractRowZone(fauxRun, ri, labMapX, zoneEntry);
+        const nm =
+          mergedPlaneN > 0
+            ? beamFlatMemberTableNameForFlatRow(fauxRun, ri, labMapX, flatPl, zoneEntry)
+            : beamMemberTableDisplayMarkStripBundledZone(beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX));
+        const flatTx = beamFlatTextValuesFromPlane(flatPl);
+        const resMm = beamFlatTableWidthDepthMmViewerFirstZone(flatPl, zoneEntry, r.width_mm, r.depth_mm);
+        let cTopInt = '';
+        let cTopCen = '';
+        let cTopExt = '';
+        let cBotInt = '';
+        let cBotCen = '';
+        let cBotExt = '';
+        let cStInt = '';
+        let cStCen = '';
+        let cStExt = '';
+        let cSide = '';
+        if (mergedPlaneN > 0) {
+          const H = beamFlatMemberTableZoneColumnHitsFromRow(fauxRun, ri, labMapX, flatPl, zoneEntry);
+          const hitInt = H.hitInt;
+          const hitCen = H.hitCen;
+          const hitExt = H.hitExt;
+          cTopInt = hitInt ? zb('int_top_bar', flatTx.top) : '';
+          cTopCen = hitCen ? zb('cen_top_bar', flatTx.top) : '';
+          cTopExt = hitExt ? zb('ext_top_bar', flatTx.top) : '';
+          cBotInt = hitInt ? zb('int_bot_bar', flatTx.bot) : '';
+          cBotCen = hitCen ? zb('cen_bot_bar', flatTx.bot) : '';
+          cBotExt = hitExt ? zb('ext_bot_bar', flatTx.bot) : '';
+          cStInt = hitInt ? zb('int_stirrup_bar', flatTx.stir) : '';
+          cStCen = hitCen ? zb('cen_stirrup_bar', flatTx.stir) : '';
+          cStExt = hitExt ? zb('ext_stirrup_bar', flatTx.stir) : '';
+          cSide = hitInt || hitCen || hitExt ? zb('side_bar', flatTx.skin) : '';
+        } else {
+          cTopInt = zb('int_top_bar', r.int_top_bar);
+          cTopCen = zb('cen_top_bar', r.cen_top_bar);
+          cTopExt = zb('ext_top_bar', r.ext_top_bar);
+          cBotInt = zb('int_bot_bar', r.int_bot_bar);
+          cBotCen = zb('cen_bot_bar', r.cen_bot_bar);
+          cBotExt = zb('ext_bot_bar', r.ext_bot_bar);
+          cStInt = zb('int_stirrup_bar', r.int_stirrup_bar);
+          cStCen = zb('cen_stirrup_bar', r.cen_stirrup_bar);
+          cStExt = zb('ext_stirrup_bar', r.ext_stirrup_bar);
+          cSide = zb('side_bar', r.side_bar);
         }
-        const a = agg[mark];
-        if (zKey) a.zSeen.add(zKey);
-        if (sx) a.sxSet.add(sx);
-        if (!a.widthMm && fr && fr.width_mm) a.widthMm = z(fr.width_mm);
-        if (!a.depthMm && fr && fr.depth_mm) a.depthMm = z(fr.depth_mm);
-
-        function applyTo(zone) {
-          if (zone === 'INT') {
-            a.topInt = mergeCell(a.topInt, tx.top);
-            a.botInt = mergeCell(a.botInt, tx.bot);
-            a.stInt = mergeCell(a.stInt, tx.stir);
-          } else if (zone === 'CEN') {
-            a.topCen = mergeCell(a.topCen, tx.top);
-            a.botCen = mergeCell(a.botCen, tx.bot);
-            a.stCen = mergeCell(a.stCen, tx.stir);
-          } else if (zone === 'EXT') {
-            a.topExt = mergeCell(a.topExt, tx.top);
-            a.botExt = mergeCell(a.botExt, tx.bot);
-            a.stExt = mergeCell(a.stExt, tx.stir);
-          }
-        }
-        if (zKey === 'ALL') {
-          applyTo('INT');
-          applyTo('CEN');
-          applyTo('EXT');
-        } else if (zKey) {
-          if (zKey === 'EXT' && shouldMirrorEndToIntExt(a)) {
-            applyTo('EXT');
-            applyTo('INT');
-          } else {
-            applyTo(zKey);
-          }
-        }
-        // Side Bar는 부재별표/엑셀에서 채우지 않음(요청사항)
-      });
-
-      // 엑셀도 picked 기반으로 누락된 부위(특히 EXT/END)를 보강해 채운다.
-      const picked = Array.isArray(v.beam_flat_picked) ? v.beam_flat_picked : [];
-      const centersByMarkZone = {};
-      picked.forEach(function (p) {
-        const m = p && p.member;
-        const s = p && p.section;
-        const z = p && p.zone;
-        if (!m || !s || !z) return;
-        const mt = String(m.text || '').trim();
-        const zx = String(z.text || '').trim().toUpperCase();
-        let zk = '';
-        if (zx === 'INT') zk = 'INT';
-        else if (zx === 'CEN' || zx === 'CENTER') zk = 'CEN';
-        else if (zx === 'EXT' || zx === 'END') zk = 'EXT';
-        else if (zx === 'ALL') zk = 'ALL';
-        const x = Number(s.x);
-        const y = Number(s.y);
-        if (!mt || !zk || ![x, y].every(Number.isFinite)) return;
-        centersByMarkZone[mt] = centersByMarkZone[mt] || {};
-        (centersByMarkZone[mt][zk] = centersByMarkZone[mt][zk] || []).push([x, y]);
-      });
-
-      const planeAnalyses = Array.isArray(lastRunByCategory.beam && lastRunByCategory.beam.beam_flat_merged_section_analysis)
-        ? lastRunByCategory.beam.beam_flat_merged_section_analysis
-        : [];
-      function plCentroidXY(pl) {
-        if (!pl) return null;
-        let cx = pl.centroid && Number(pl.centroid.x);
-        let cy = pl.centroid && Number(pl.centroid.y);
-        if (![cx, cy].every(Number.isFinite)) {
-          const bb = pl.norm_bbox || pl.section_bbox;
-          if (bb && bb.length === 4 && bb.every((q) => Number.isFinite(Number(q)))) {
-            cx = (Number(bb[0]) + Number(bb[2])) * 0.5;
-            cy = (Number(bb[1]) + Number(bb[3])) * 0.5;
-          }
-        }
-        if (![cx, cy].every(Number.isFinite)) return null;
-        return [cx, cy];
-      }
-      function nearestPlaneTx(x, y) {
-        let best = null;
-        let bestS = Infinity;
-        for (let i = 0; i < planeAnalyses.length; i++) {
-          const pl = planeAnalyses[i];
-          const c = plCentroidXY(pl);
-          if (!c) continue;
-          const dx = Math.abs(c[0] - x);
-          const dy = Math.abs(c[1] - y);
-          const s = dy + dx * 0.25;
-          if (s < bestS) {
-            bestS = s;
-            best = pl;
-          }
-        }
-        if (!best) return null;
-        const rv = (best && best.below_text_role_values) || {};
-        const chain = Array.isArray(best && best.below_text_chain_values) ? best.below_text_chain_values : [];
-        let skinStr = String(rv['표피철근'] || '').trim();
-        if (!skinStr && chain.length >= 4) {
-          const c3 = String(chain[3] || '').trim();
-          if (c3) skinStr = c3;
-        }
-        return {
-          top: String(rv['상부근'] || chain[0] || '').trim(),
-          bot: String(rv['하부근'] || chain[1] || '').trim(),
-          stir: String(rv['스트럽'] || chain[2] || '').trim(),
-          skin: skinStr,
-        };
-      }
-
-      order.forEach(function (mark) {
-        const a = agg[mark];
-        if (!a) return;
-        const mz = centersByMarkZone[mark] || {};
-        function fillIfEmpty(zone) {
-          if (zone === 'INT' && (a.topInt || a.botInt || a.stInt)) return;
-          if (zone === 'CEN' && (a.topCen || a.botCen || a.stCen)) return;
-          if (zone === 'EXT' && (a.topExt || a.botExt || a.stExt)) return;
-          const pts = (mz && mz[zone]) || [];
-          if (!pts.length) return;
-          const tx = nearestPlaneTx(Number(pts[0][0]), Number(pts[0][1]));
-          if (!tx) return;
-          function mergeTo(z) {
-            if (z === 'INT') {
-              a.topInt = mergeCell(a.topInt, tx.top);
-              a.botInt = mergeCell(a.botInt, tx.bot);
-              a.stInt = mergeCell(a.stInt, tx.stir);
-            } else if (z === 'CEN') {
-              a.topCen = mergeCell(a.topCen, tx.top);
-              a.botCen = mergeCell(a.botCen, tx.bot);
-              a.stCen = mergeCell(a.stCen, tx.stir);
-            } else if (z === 'EXT') {
-              a.topExt = mergeCell(a.topExt, tx.top);
-              a.botExt = mergeCell(a.botExt, tx.bot);
-              a.stExt = mergeCell(a.stExt, tx.stir);
-            }
-          }
-          mergeTo(zone);
-          a.side = mergeCell(a.side, tx.skin);
-        }
-        fillIfEmpty('INT');
-        fillIfEmpty('CEN');
-        fillIfEmpty('EXT');
-        if (shouldMirrorEndToIntExt(a)) {
-          if (!a.topInt && !a.botInt && !a.stInt) {
-            a.topInt = mergeCell(a.topInt, a.topExt);
-            a.botInt = mergeCell(a.botInt, a.botExt);
-            a.stInt = mergeCell(a.stInt, a.stExt);
-          }
-        }
-      });
-
-      order.forEach(function (mark, oi) {
-        const a = agg[mark];
-        if (!a) return;
-        const sx = Array.from(a.sxSet.values()).filter(Boolean).join(', ');
         aoa.push([
-          oi + 1,
-          mark,
-          a.type,
-          a.material,
-          a.widthMm,
-          a.depthMm,
-          a.topInt,
-          a.topCen,
-          a.topExt,
-          a.botInt,
-          a.botCen,
-          a.botExt,
-          a.stInt,
-          a.stCen,
-          a.stExt,
-          '',
+          dispRow,
+          nm,
+          z(r.type),
+          z(r.material),
+          z(resMm.w),
+          z(resMm.d),
+          cTopInt,
+          cTopCen,
+          cTopExt,
+          cBotInt,
+          cBotCen,
+          cBotExt,
+          cStInt,
+          cStCen,
+          cStExt,
+          cSide,
           sx,
         ]);
       });
-      return aoa;
-    }
-
-    const labMapX = buildPreviewLabelEidMap();
-    rows.forEach((r, ri) => {
-      const sx = formatBeamMergedStripXs(r, strips);
-      const z = (x) => (x != null && x !== '' ? x : '');
-      const zb = (key, val) => formatBeamExtractDisplay(key, val);
-      const mergedPlaneN = Array.isArray(fauxRun.beam_flat_merged_section_analysis)
-        ? fauxRun.beam_flat_merged_section_analysis.length
-        : 0;
-      const flatPl = beamFlatAnalysisForExtractRow(fauxRun, ri, labMapX);
-      const nm =
-        mergedPlaneN > 0
-          ? beamFlatMemberTableNameForFlatRow(fauxRun, ri, labMapX, flatPl)
-          : beamCanvasMemberNameForMemberTable(fauxRun, ri, labMapX);
-      const flatTx = beamFlatTextValuesFromPlane(flatPl);
-      const resMm = beamFlatTableWidthDepthMmViewerFirst(flatPl, r.width_mm, r.depth_mm);
-      let cTopInt = '';
-      let cTopCen = '';
-      let cTopExt = '';
-      let cBotInt = '';
-      let cBotCen = '';
-      let cBotExt = '';
-      let cStInt = '';
-      let cStCen = '';
-      let cStExt = '';
-      let cSide = '';
-      if (mergedPlaneN > 0) {
-        const zk = beamFlatMemberTableZoneColsKeyFromRow(fauxRun, ri, labMapX, flatPl);
-        const hitInt = zk === 'INT' || zk === 'ALL';
-        const hitCen = zk === 'CEN' || zk === 'ALL';
-        const hitExt = zk === 'EXT' || zk === 'ALL';
-        cTopInt = hitInt ? zb('int_top_bar', flatTx.top) : '';
-        cTopCen = hitCen ? zb('cen_top_bar', flatTx.top) : '';
-        cTopExt = hitExt ? zb('ext_top_bar', flatTx.top) : '';
-        cBotInt = hitInt ? zb('int_bot_bar', flatTx.bot) : '';
-        cBotCen = hitCen ? zb('cen_bot_bar', flatTx.bot) : '';
-        cBotExt = hitExt ? zb('ext_bot_bar', flatTx.bot) : '';
-        cStInt = hitInt ? zb('int_stirrup_bar', flatTx.stir) : '';
-        cStCen = hitCen ? zb('cen_stirrup_bar', flatTx.stir) : '';
-        cStExt = hitExt ? zb('ext_stirrup_bar', flatTx.stir) : '';
-        cSide = hitInt || hitCen || hitExt ? zb('side_bar', flatTx.skin) : '';
-      } else {
-        cTopInt = zb('int_top_bar', r.int_top_bar);
-        cTopCen = zb('cen_top_bar', r.cen_top_bar);
-        cTopExt = zb('ext_top_bar', r.ext_top_bar);
-        cBotInt = zb('int_bot_bar', r.int_bot_bar);
-        cBotCen = zb('cen_bot_bar', r.cen_bot_bar);
-        cBotExt = zb('ext_bot_bar', r.ext_bot_bar);
-        cStInt = zb('int_stirrup_bar', r.int_stirrup_bar);
-        cStCen = zb('cen_stirrup_bar', r.cen_stirrup_bar);
-        cStExt = zb('ext_stirrup_bar', r.ext_stirrup_bar);
-        cSide = zb('side_bar', r.side_bar);
-      }
-      aoa.push([
-        ri + 1,
-        nm,
-        z(r.type),
-        z(r.material),
-        z(resMm.w),
-        z(resMm.d),
-        cTopInt,
-        cTopCen,
-        cTopExt,
-        cBotInt,
-        cBotCen,
-        cBotExt,
-        cStInt,
-        cStCen,
-        cStExt,
-        cSide,
-        sx,
-      ]);
     });
     return aoa;
   }
@@ -6928,8 +6984,25 @@
   }
 
   /**
+   * 부재별 표(가로 Y묶음·`beam_flat_merged_section_analysis`)와 동일한 추출 경로인지.
+   * `renderExtractAuxPanels` 의 부재별 표 분기와 조건을 맞춘다.
+   */
+  function beamHorizontalYClusterMemberPanelPath(run, v) {
+    return (
+      run &&
+      String(run.category || '').toLowerCase() === 'beam' &&
+      v &&
+      Array.isArray(run.rows) &&
+      run.rows.length > 0 &&
+      Array.isArray(v.beam_row_clusters) &&
+      v.beam_row_clusters.length > 0
+    );
+  }
+
+  /**
    * 기둥 추출 행의 표시용 이슈 목록(순서 고정: 층 → 단면기하 → 주근수 → B×H → 중복).
    * @param {object} options forCadOverlay: true면 캔버스 강조용(중복 제외 — 위치 불명확).
+   *        run: 보 추출 전체 run — 가로 Y묶음+프론트 단면 경로일 때 서버 단면 기하 이슈를 에러목록에서 제외할 때 사용.
    */
   function columnRowExtractIssueStrings(r, validation, rowIndex, options) {
     const opt = options || {};
@@ -6942,8 +7015,13 @@
     const vb = !!v.column_vertical_blocks;
     const vbb = beamValidationPolyNav(v);
     const sg = r.section_geometry;
+    /* 보 flat 분기 또는 부재별 표와 동일한 가로 Y묶음(beam_row_clusters) — 단면은 프론트만 쓰므로 서버 section_geometry·zone 비교는 에러목록에 넣지 않음 */
+    const beamFlatBranch =
+      String((v && v.beam_section_geo_branch) || '').trim().toLowerCase() === 'flat' ||
+      String((v && v.beam_layout_resolved) || '').trim().toLowerCase() === 'flat';
+    const beamFrontPlanePanel = beamFlatBranch || beamHorizontalYClusterMemberPanelPath(opt.run, v);
 
-    if (vbb && Array.isArray(r.beam_section_geometry_zones) && r.beam_section_geometry_zones.length) {
+    if (!beamFrontPlanePanel && vbb && Array.isArray(r.beam_section_geometry_zones) && r.beam_section_geometry_zones.length) {
       r.beam_section_geometry_zones.forEach(function (z, zi) {
         const g = z.section_geometry;
         if (!g) return;
@@ -6962,7 +7040,7 @@
           parts.push('부위 ' + zn + ' B×H: ' + (ol || '도면') + ' vs ' + tabPart + ' 불일치');
         }
       });
-    } else if ((vb || vbb) && sg) {
+    } else if (!beamFrontPlanePanel && (vb || vbb) && sg) {
       if (sg.ok === false) {
         const rs = sg.reason ? String(sg.reason) : '';
         parts.push('단면 기하: ' + (rs ? rs.slice(0, 200) : '분석 실패'));
@@ -6989,7 +7067,11 @@
       }
     }
 
-    if (!forCad) {
+    if (!forCad && !beamFrontPlanePanel) {
+      /* 보 프론트 단면 패널 경로(가로 Y묶음 · beam_flat_merged_section_analysis)에서는
+       * 서버측 duplicate_row_indices 가 부재별 표의 그룹 병합(displayName 기준) 결과와
+       * 어긋나 사용자에게 혼동을 준다. 프론트 뷰의 그룹 병합 결과가 진실이므로
+       * 이 경로에서는 서버 중복 의심 메시지를 에러목록에 넣지 않는다. */
       const dup = new Set(v.duplicate_row_indices || []);
       if (typeof rowIndex === 'number' && dup.has(rowIndex)) {
         parts.push('중복 검사 의심');
@@ -7004,7 +7086,7 @@
     const v = run.validation || {};
     const rows = run.rows;
     rows.forEach(function (r, ri) {
-      const parts = columnRowExtractIssueStrings(r, v, ri, {});
+      const parts = columnRowExtractIssueStrings(r, v, ri, { run: run });
       if (!parts.length) return;
       let lab = String(r.mark != null ? r.mark : r.member_label || '').trim().slice(0, 48);
       if (!lab) lab = '행 ' + (ri + 1);
@@ -7149,8 +7231,12 @@
     }
     const bdm = $('extractBeamDimMismatchWrap');
     const bdh = $('extractBeamDimMismatchHost');
+    const bdd = $('extractBeamDimMismatchDetails');
     if (bdm) {
       bdm.style.display = 'none';
+    }
+    if (bdd) {
+      bdd.removeAttribute('open');
     }
     if (bdh) {
       bdh.innerHTML = '';
@@ -7222,16 +7308,10 @@
         const v0 = run.validation || {};
         const dimMr = pack.dimMismatchRows || [];
         if (dimMr.length) beamFlatRenderDimMismatchTable(dimMr);
-        else if (!beamMemberTableUseServerFlatRows)
-          beamFlatRenderDimMismatchTable([], {
-            emptyHint:
-              '부재별 표는 프론트 단면 분석과 동일합니다. 서버에 flat 부재별 행이 있어도 표 본문에는 쓰지 않습니다. Width·Depth 우선 순위는 표에 적용됩니다.',
-          });
-        else if (Array.isArray(v0.beam_flat_member_table_rows) && v0.beam_flat_member_table_rows.length)
-          beamFlatRenderDimMismatchTable([]);
         else
           beamFlatRenderDimMismatchTable([], {
-            emptyHint: 'flat 부재별 서버 행이 없으면 세 원천 비교 목록만 생략됩니다. Width·Depth 우선 순위 선택은 표에 적용됩니다.',
+            emptyHint:
+              '부재별 표 그룹의 모든 단면(plane)에서 텍스트·표기 / 치수선 / 단면 W×H 가 일치합니다. (단면 W×H = 캔버스 빨간 박스의 W·H 라벨과 동일)',
           });
       } else if (v && beamValidationPolyNav(v) && rows && rows.length) {
         mb.style.display = 'block';
@@ -7347,7 +7427,7 @@
         let cell =
           cat === 'beam' ? formatBeamExtractDisplay(k, r[k]) : formatExtractCell(r[k]);
         if (cat === 'beam' && (k === 'mark' || k === 'name')) {
-          cell = beamCanvasMemberNameForMemberTable(run, ri, labMapHz);
+          cell = beamMemberTableDisplayMarkStripBundledZone(beamCanvasMemberNameForMemberTable(run, ri, labMapHz));
         }
         html += '<td>' + escapeHtml(cell) + '</td>';
       });
@@ -7494,7 +7574,7 @@
         let cell =
           cat0 === 'beam' ? formatBeamExtractDisplay(k, r[k]) : formatExtractCell(r[k]);
         if (cat0 === 'beam' && (k === 'mark' || k === 'name')) {
-          cell = beamCanvasMemberNameForMemberTable(run, ri, labMapHz0);
+          cell = beamMemberTableDisplayMarkStripBundledZone(beamCanvasMemberNameForMemberTable(run, ri, labMapHz0));
         }
         html += '<td>' + escapeHtml(cell) + '</td>';
       });
@@ -8611,15 +8691,7 @@
       return !!(s && markRe.test(s) && /\d/.test(s));
     }
     function zoneKey(t) {
-      const s = String(t || '').toUpperCase().replace(/\s+/g, '');
-      if (!s) return '';
-      if (s.indexOf('INT') >= 0) return 'INT';
-      if (s.indexOf('CENTER') >= 0 || s === 'CEN' || s.indexOf('CEN') === 0) return 'CENTER';
-      if (s.indexOf('ALL') >= 0) return 'ALL';
-      // EXT는 END('단부' 등)보다 먼저 — 'EXTENDED'에 'END'가 부분문자열로 들어가 오인될 수 있음
-      if (s.indexOf('EXT') >= 0 || s.indexOf('EXTERIOR') >= 0) return 'EXT';
-      if (s.indexOf('END') >= 0) return 'END';
-      return '';
+      return beamFlatZoneKeyFromClusterLabel(String(t || ''));
     }
     const marks = [];
     const zones = [];
@@ -9115,6 +9187,27 @@
     if (!s) return '';
     const m = s.match(/^(.+?)(?:\s+)?\(\s*(\d{2,5})\s*[xX×]\s*(\d{2,5})\s*\)\s*$/);
     return m && m[1] ? m[1].trim() : s;
+  }
+
+  /** `RG3B · END` / `RG3B · ALL` 등: 마지막 토큰이 부위 라벨이면 제거(부위는 Int/Cen/Ext 열만 사용). */
+  function beamMemberTableDisplayMarkStripBundledZone(displayName) {
+    let s = String(displayName || '').replace(/\s+/g, ' ').trim();
+    if (!s) return '';
+    s = beamMemberTableDisplayMarkStripDims(s);
+    const parts = s.split(/\s*·\s*/);
+    if (parts.length < 2) return s;
+    const last = parts[parts.length - 1].trim();
+    const lead = beamFlatParseMemberZoneLeadKey(last);
+    if (lead) {
+      const joined = parts.slice(0, -1).join(' · ').trim();
+      return joined || s;
+    }
+    const zk = beamFlatZoneKeyFromClusterLabel(last);
+    if (zk === 'INT' || zk === 'CENTER' || zk === 'ALL' || zk === 'EXT' || zk === 'END') {
+      const joined = parts.slice(0, -1).join(' · ').trim();
+      return joined || s;
+    }
+    return s;
   }
 
   /**
@@ -10173,6 +10266,14 @@
     const yBandHi = y1c + padTop;
     const xBandLo = x0c - padBot;
     const xBandHi = x1c + padBot;
+    /* 탐색 띠(overlap 계산과 동일) 의 폭·높이.
+       전체 선분 길이가 이를 의미있게 초과하면 그 선은 이 단면 후보에 속할 수 없는 외부 가이드/그리드선이므로 즉시 제외. */
+    const bandW = Math.max(1, x1c - x0c + 2 * padH);
+    const bandH = Math.max(1, y1c - y0c + 2 * pad);
+    /* H 선분(가로): 탐색 띠 폭의 1.05배 + 60mm 여유 — 도면 폭 가로지르는 가이드선/치수선 차단 */
+    const maxSpanXForBand = bandW * 1.05 + 60;
+    /* V 선분(세로): 탐색 띠 높이의 1.0배 + 40mm 여유 — 단면 face 세로선은 띠 안에 거의 들어맞아야 함 */
+    const maxSpanYForBand = bandH * 1.0 + 40;
     segments.forEach(function (s) {
       if (!s) return;
       if (s.orient === 'H') {
@@ -10185,16 +10286,23 @@
           yHi <= yBandHi && yLo >= yBandLo
             ? (yLo + yHi) * 0.5
             : (Math.max(yLo, yBandLo) + Math.min(yHi, yBandHi)) * 0.5;
-        const ov = Math.max(0, Math.min(x1c + padH, s.x1) - Math.max(x0c - padH, s.x0));
-        const need = Math.max(1, Math.min(x1c - x0c + padH * 2, s.x1 - s.x0));
+        const xLoH = Math.min(Number(s.x0), Number(s.x1));
+        const xHiH = Math.max(Number(s.x0), Number(s.x1));
+        const ov = Math.max(0, Math.min(x1c + padH, xHiH) - Math.max(x0c - padH, xLoH));
+        const need = Math.max(1, Math.min(x1c - x0c + padH * 2, xHiH - xLoH));
         if (!overlapPassH(ov, need, hy)) {
           inc('rej_overlap');
           return;
         }
-        /* 직선: 코어 X구간 [x0c,x1c] 밖으로 훨씬 더 길게 나간 가로 격자선 제외(단면 외곽은 대부분 코어 안에 있음) */
+        /* 폴리라인 일부라도 AABB 길이가 탐색 띠를 크게 넘으면 층 전체 격자선 — bendCount 무관하게 제외 */
+        const spanXBand = Math.abs(Number(s.x1) - Number(s.x0));
+        if (Number.isFinite(spanXBand) && spanXBand > maxSpanXForBand) {
+          inc('rej_band_width');
+          return;
+        }
         if ((Number(s.bendCount) || 0) === 0) {
-          const spanX = Math.max(0, Number(s.x1) - Number(s.x0));
-          const insideCoreX = Math.max(0, Math.min(x1c, Number(s.x1)) - Math.max(x0c, Number(s.x0)));
+          const spanX = Math.abs(Number(s.x1) - Number(s.x0));
+          const insideCoreX = Math.max(0, Math.min(x1c, xHiH) - Math.max(x0c, xLoH));
           const outsideCoreX = Math.max(0, spanX - insideCoreX);
           if (
             Number.isFinite(spanX) &&
@@ -10218,15 +10326,22 @@
           xHi <= xBandHi && xLo >= xBandLo
             ? (xLo + xHi) * 0.5
             : (Math.max(xLo, xBandLo) + Math.min(xHi, xBandHi)) * 0.5;
-        const ov = Math.max(0, Math.min(y1c + pad, s.y1) - Math.max(y0c - pad, s.y0));
-        const need = Math.max(1, Math.min(y1c - y0c + pad * 2, s.y1 - s.y0));
+        const yLoV = Math.min(Number(s.y0), Number(s.y1));
+        const yHiV = Math.max(Number(s.y0), Number(s.y1));
+        const ov = Math.max(0, Math.min(y1c + pad, yHiV) - Math.max(y0c - pad, yLoV));
+        const need = Math.max(1, Math.min(y1c - y0c + pad * 2, yHiV - yLoV));
         if (!overlapPassV(ov, need, hx)) {
           inc('rej_overlap');
           return;
         }
+        const spanYBand = Math.abs(Number(s.y1) - Number(s.y0));
+        if (Number.isFinite(spanYBand) && spanYBand > maxSpanYForBand) {
+          inc('rej_band_height');
+          return;
+        }
         if ((Number(s.bendCount) || 0) === 0) {
-          const spanY = Math.max(0, Number(s.y1) - Number(s.y0));
-          const insideCoreY = Math.max(0, Math.min(y1c, Number(s.y1)) - Math.max(y0c, Number(s.y0)));
+          const spanY = Math.abs(Number(s.y1) - Number(s.y0));
+          const insideCoreY = Math.max(0, Math.min(y1c, yHiV) - Math.max(y0c, yLoV));
           const outsideCoreY = Math.max(0, spanY - insideCoreY);
           if (
             Number.isFinite(spanY) &&
@@ -10245,6 +10360,10 @@
     if (st) {
       st.maxVertRun = maxVertRun;
       st.maxHorzRun = maxHorzRun;
+      st.maxSpanYForBand = maxSpanYForBand;
+      st.maxSpanXForBand = maxSpanXForBand;
+      st.bandH = bandH;
+      st.bandW = bandW;
       st.minOverlap = minOverlap;
       st.pad = pad;
       st.padTop = padTop;
@@ -10259,12 +10378,44 @@
     return found;
   }
 
+  /**
+   * `beamFlatSegmentsInSectionBBox`가 확장된 탐색 박스(bbSeg 등)로 길이 상한을 잡으면
+   * 층 전체 세로 격자선이 bbox_in에 남을 수 있음 → 단면 코어·norm 단면 차원으로 재컷.
+   * (beamFlatSegmentsInSectionBBox와 동일 2.5×+200mm 규칙, tightBb만 다름.)
+   */
+  function beamFlatFilterSegmentsMaxSpanVsTightBb(segs, tightBb4, extraPad) {
+    if (!Array.isArray(segs) || !segs.length || !isFiniteBBox4(tightBb4)) return segs || [];
+    const nb = beamFlatNormSectionBBox(tightBb4);
+    if (!nb) return segs;
+    const ex = Number(extraPad) || 0;
+    const bh = Math.max(1e-6, nb.y1 - nb.y0 + 2 * ex);
+    const bw = Math.max(1e-6, nb.x1 - nb.x0 + 2 * ex);
+    const maxVL = bh * 2.5 + 200;
+    const maxHL = bw * 2.5 + 200;
+    return segs.filter(function (s) {
+      if (!s) return false;
+      if (s.orient === 'V') {
+        const len = Math.abs(Number(s.y1) - Number(s.y0));
+        return !Number.isFinite(len) || len <= maxVL;
+      }
+      if (s.orient === 'H') {
+        const len = Math.abs(Number(s.x1) - Number(s.x0));
+        return !Number.isFinite(len) || len <= maxHL;
+      }
+      return true;
+    });
+  }
+
   /** 클러스터 1개 → 병합 전 meta 행(단계별 bbox 디버그 필드 포함) */
   function beamFlatPushClusterMetaRow(metaRows, ci, clusterObj, segments) {
     const bb0 = clusterObj && clusterObj.bbox;
     if (!isFiniteBBox4(bb0)) return;
     const nearSegStats = {};
-    const nearSegs = beamFlatNearbySegmentsForCluster(clusterObj, segments, nearSegStats);
+    let nearSegs = beamFlatNearbySegmentsForCluster(clusterObj, segments, nearSegStats);
+    const coreTight = nearSegStats.coreBb;
+    if (isFiniteBBox4(coreTight)) {
+      nearSegs = beamFlatFilterSegmentsMaxSpanVsTightBb(nearSegs, coreTight, 0);
+    }
     const segBb0 = bboxFromBeamFlatSegments(nearSegs);
     const circleDisp = [bb0[0] - 18, bb0[1] - 18, bb0[2] + 18, bb0[3] + 18];
     let unitBb = circleDisp.slice();
@@ -10351,8 +10502,14 @@
       keep_v: 0,
       rej_overlap: 0,
       rej_long_straight: 0,
+      rej_band_height: 0,
+      rej_band_width: 0,
       maxVertRun: null,
       maxHorzRun: null,
+      maxSpanXForBand: null,
+      maxSpanYForBand: null,
+      bandW: null,
+      bandH: null,
       minOverlap: null,
       pad: null,
       padTop: null,
@@ -10365,12 +10522,16 @@
       const row = metaRows && metaRows[ii] ? metaRows[ii] : null;
       const r = row && row.nearSegStats ? row.nearSegStats : null;
       if (!r) return;
-      ['cand_h', 'cand_v', 'keep', 'keep_h', 'keep_v', 'rej_overlap', 'rej_long_straight'].forEach(function (k) {
+      ['cand_h', 'cand_v', 'keep', 'keep_h', 'keep_v', 'rej_overlap', 'rej_long_straight', 'rej_band_height', 'rej_band_width'].forEach(function (k) {
         st[k] += Number(r[k]) || 0;
       });
       if (!filled) {
         if (r.maxVertRun != null) st.maxVertRun = r.maxVertRun;
         if (r.maxHorzRun != null) st.maxHorzRun = r.maxHorzRun;
+        if (r.maxSpanXForBand != null) st.maxSpanXForBand = r.maxSpanXForBand;
+        if (r.maxSpanYForBand != null) st.maxSpanYForBand = r.maxSpanYForBand;
+        if (r.bandW != null) st.bandW = r.bandW;
+        if (r.bandH != null) st.bandH = r.bandH;
         if (r.minOverlap != null) st.minOverlap = r.minOverlap;
         if (r.pad != null) st.pad = r.pad;
         filled = true;
@@ -10381,6 +10542,20 @@
         if (r.maxHorzRun != null)
           st.maxHorzRun =
             st.maxHorzRun == null ? r.maxHorzRun : Math.max(Number(st.maxHorzRun), Number(r.maxHorzRun));
+        if (r.maxSpanXForBand != null)
+          st.maxSpanXForBand =
+            st.maxSpanXForBand == null
+              ? r.maxSpanXForBand
+              : Math.max(Number(st.maxSpanXForBand), Number(r.maxSpanXForBand));
+        if (r.maxSpanYForBand != null)
+          st.maxSpanYForBand =
+            st.maxSpanYForBand == null
+              ? r.maxSpanYForBand
+              : Math.max(Number(st.maxSpanYForBand), Number(r.maxSpanYForBand));
+        if (r.bandW != null)
+          st.bandW = st.bandW == null ? r.bandW : Math.max(Number(st.bandW), Number(r.bandW));
+        if (r.bandH != null)
+          st.bandH = st.bandH == null ? r.bandH : Math.max(Number(st.bandH), Number(r.bandH));
       }
       const cs = Number(r.coreSlack);
       if (Number.isFinite(cs)) {
@@ -10542,6 +10717,53 @@
     return true;
   }
 
+  /**
+   * 세로형(회전형) 단면에서 철근·스트럽 구역 때문에 X로만 갈라진 두 unit bbox.
+   * `beamFlatWorldBboxesCloseEnoughToMerge` 는 Y 간격·X 중심 정렬(세로 스택) 전제라
+   * 좌·우 절반(겹침 없음)은 병합되지 않음 → 한 단면이 #1 / #7 처럼 둘로 잡힘.
+   */
+  function beamFlatWorldBboxesHorizontallyAdjacentToMerge(a, b) {
+    if (!isFiniteBBox4(a) || !isFiniteBBox4(b)) return false;
+    const ax0 = Math.min(Number(a[0]), Number(a[2]));
+    const ax1 = Math.max(Number(a[0]), Number(a[2]));
+    const ay0 = Math.min(Number(a[1]), Number(a[3]));
+    const ay1 = Math.max(Number(a[1]), Number(a[3]));
+    const bx0 = Math.min(Number(b[0]), Number(b[2]));
+    const bx1 = Math.max(Number(b[0]), Number(b[2]));
+    const by0 = Math.min(Number(b[1]), Number(b[3]));
+    const by1 = Math.max(Number(b[1]), Number(b[3]));
+    if (![ax0, ax1, ay0, ay1, bx0, bx1, by0, by1].every(Number.isFinite)) return false;
+    const aw = Math.max(1, ax1 - ax0);
+    const bw = Math.max(1, bx1 - bx0);
+    const ah = Math.max(1, ay1 - ay0);
+    const bh = Math.max(1, by1 - by0);
+    const ovX = Math.max(0, Math.min(ax1, bx1) - Math.max(ax0, bx0));
+    if (ovX > Math.max(28, Math.min(aw, bw) * 0.07)) return false;
+    /* Y 겹침은 충분히 커야 함 — "한 세로 단면이 좌·우로 갈라진" 케이스만 묶고
+     * 위·아래 다른 단면을 가로로 묶지 않도록 한다. */
+    const ovY = Math.max(0, Math.min(ay1, by1) - Math.max(ay0, by0));
+    const minH = Math.max(1, Math.min(ah, bh));
+    const ovYRel = ovY / minH;
+    if (ovYRel < 0.45) return false;
+    const gapX = ax0 > bx1 ? ax0 - bx1 : bx0 > ax1 ? bx0 - ax1 : 0;
+    /* 회전 세로형 단면의 좌·우 절반은 각 절반의 세로 길이(unitBb 의 ah/bh)가 단면 H 에 가깝다.
+     * 단면 안쪽(철근 미배치 구간) 폭은 보통 H 와 비슷하거나 약간 작은 수준이므로
+     * 허용 X 간격을 max(ah, bh) 기반으로 잡는다(상한은 충분히 크게). */
+    const refH = Math.max(ah, bh);
+    const xTolByH = Math.max(280, Math.min(2200, refH * 1.25));
+    /* 두 절반의 가로 폭이 작아도 단면이 클 수 있으므로 sumW 기반은 보조로만 쓴다. */
+    const sumW = aw + bw + gapX;
+    const xTolBySumW = Math.max(200, 0.35 * sumW);
+    const xTol = Math.max(xTolByH, xTolBySumW);
+    if (gapX > xTol) return false;
+    const acy = (ay0 + ay1) * 0.5;
+    const bcy = (by0 + by1) * 0.5;
+    /* Y 중심 차이는 두 절반 높이의 일부 이내(상한 1500). 너무 엄격하면 한 쪽이 짧을 때 누락. */
+    const cyTol = Math.max(180, Math.min(1500, Math.max(ah, bh) * 0.42));
+    if (Math.abs(acy - bcy) > cyTol) return false;
+    return true;
+  }
+
   /** 겹치는 bbox들을 transitively 묶어 각 그룹의 합집합 bbox + 메타 반환 */
   function beamFlatMergeOverlappingUnitBboxes(metaRows) {
     const rows = Array.isArray(metaRows) ? metaRows : [];
@@ -10571,7 +10793,8 @@
         if (
           beamFlatWorldBboxesOverlap(bi, bj) ||
           beamFlatWorldBboxesOverlapInflated(bi, bj, null) ||
-          beamFlatWorldBboxesCloseEnoughToMerge(bi, bj)
+          beamFlatWorldBboxesCloseEnoughToMerge(bi, bj) ||
+          beamFlatWorldBboxesHorizontallyAdjacentToMerge(bi, bj)
         )
           unite(i, j);
       }
@@ -10670,7 +10893,15 @@
     return x >= nb.x0 - p && x <= nb.x1 + p && y >= nb.y0 - p && y <= nb.y1 + p;
   }
 
-  /** 단면 bbox 안(여유 pad)의 선분 — 기본은 중심점; 가로·세로는 bbox와 실제 겹침이 있으면 포함(긴 외곽선 중심이 박스 밖인 경우) */
+  /**
+   * 단면 bbox 안(여유 pad)의 선분 — 기본은 중심점; 가로·세로는 bbox와 실제 겹침이 있으면 포함(긴 외곽선 중심이 박스 밖인 경우).
+   *
+   * 추가 가드: 탐색 박스(`bb`)의 폭/높이 대비 **과도하게 긴** 선분(예: 도면 전체를 가로지르는 그리드·치수선)은
+   * 단면 face·스트럽 계산을 오염시키므로 길이 비율로 컷오프한다.
+   * - V 선분: 길이 > `bh * MAX_FACTOR` + `MIN_MARGIN`  → 제외
+   * - H 선분: 길이 > `bw * MAX_FACTOR` + `MIN_MARGIN`  → 제외
+   * (정상 face/스트럽 길이는 박스 차원의 ~1배 정도이므로 2.5배 + 여유 200mm로 안전한 임계 설정.)
+   */
   function beamFlatSegmentsInSectionBBox(segments, bb, pad) {
     const nb = beamFlatNormSectionBBox(bb);
     if (!nb) return [];
@@ -10683,24 +10914,39 @@
     const bh = Math.max(1e-6, nb.y1 - nb.y0);
     const minOx = Math.max(6, Math.min(56, bw * 0.028));
     const minOy = Math.max(6, Math.min(56, bh * 0.028));
+    const MAX_FACTOR = 2.5;
+    const MIN_MARGIN = 200;
+    const maxLenH = bw * MAX_FACTOR + MIN_MARGIN;
+    const maxLenV = bh * MAX_FACTOR + MIN_MARGIN;
     return (segments || []).filter(function (s) {
       if (!s) return false;
-      const mx = (Number(s.x0) + Number(s.x1)) * 0.5;
-      const my = (Number(s.y0) + Number(s.y1)) * 0.5;
+      const sx0 = Number(s.x0);
+      const sx1 = Number(s.x1);
+      const sy0 = Number(s.y0);
+      const sy1 = Number(s.y1);
+      if (s.orient === 'H') {
+        const len = Math.abs(sx1 - sx0);
+        if (Number.isFinite(len) && len > maxLenH) return false;
+      } else if (s.orient === 'V') {
+        const len = Math.abs(sy1 - sy0);
+        if (Number.isFinite(len) && len > maxLenV) return false;
+      }
+      const mx = (sx0 + sx1) * 0.5;
+      const my = (sy0 + sy1) * 0.5;
       if (beamFlatPointInNormBBox(nb, mx, my, p)) return true;
       if (s.orient === 'H') {
         if (!Number.isFinite(my)) return false;
         if (my < y0 || my > y1) return false;
-        const xLo = Math.min(Number(s.x0), Number(s.x1));
-        const xHi = Math.max(Number(s.x0), Number(s.x1));
+        const xLo = Math.min(sx0, sx1);
+        const xHi = Math.max(sx0, sx1);
         const ox = Math.max(0, Math.min(x1, xHi) - Math.max(x0, xLo));
         return ox >= minOx;
       }
       if (s.orient === 'V') {
         if (!Number.isFinite(mx)) return false;
         if (mx < x0 || mx > x1) return false;
-        const yLo = Math.min(Number(s.y0), Number(s.y1));
-        const yHi = Math.max(Number(s.y0), Number(s.y1));
+        const yLo = Math.min(sy0, sy1);
+        const yHi = Math.max(sy0, sy1);
         const oy = Math.max(0, Math.min(y1, yHi) - Math.max(y0, yLo));
         return oy >= minOy;
       }
@@ -10873,14 +11119,10 @@
       lines.push('부재명 ' + (mtxt || '-') + (ztxt ? ' · 부위 ' + ztxt : ''));
     }
 
-    const wDim = pl.width_world;
-    const hDim = pl.height_world;
-    if (wDim != null && Number.isFinite(wDim) && hDim != null && Number.isFinite(hDim)) {
-      lines.push('W ' + Math.round(wDim) + ' · H ' + Math.round(hDim));
-    } else if (wDim != null && Number.isFinite(wDim)) {
-      lines.push('W ' + Math.round(wDim));
-    } else if (hDim != null && Number.isFinite(hDim)) {
-      lines.push('H ' + Math.round(hDim));
+    /* 단면 W×H 표기: 프론트가 그리는 단면 norm/section bbox 기준만 사용 (face 가로선 길이는 노이즈가 잦아 폐기) */
+    const bboxDims = beamFlatPlaneDimsMmFromSectionBBox(pl);
+    if (bboxDims) {
+      lines.push('W ' + bboxDims.width_mm + ' · H ' + bboxDims.depth_mm);
     }
     const sl = String(pl.section_layout || '').trim();
     if (sl === 'hz_dominant') {
@@ -11483,23 +11725,55 @@
     return null;
   }
 
+  /**
+   * `beam_flat_merged_section_analysis` 단면의 norm/section bbox 폭·높이(mm 정수).
+   * `norm_bbox` 는 `{x0,y0,x1,y1}` 또는 `[x0,y1,x2,y3]` 일 수 있음 — `width_world` 가 비었을 때 단면 W×H 의 프론트 기하 폴백.
+   */
+  function beamFlatPlaneDimsMmFromSectionBBox(pl) {
+    if (!pl) return null;
+    const raw = pl.norm_bbox || pl.section_bbox;
+    if (!raw) return null;
+    let x0;
+    let y0;
+    let x1;
+    let y1;
+    if (
+      raw.length === 4 &&
+      [raw[0], raw[1], raw[2], raw[3]].every(function (q) {
+        return Number.isFinite(Number(q));
+      })
+    ) {
+      x0 = Math.min(Number(raw[0]), Number(raw[2]));
+      x1 = Math.max(Number(raw[0]), Number(raw[2]));
+      y0 = Math.min(Number(raw[1]), Number(raw[3]));
+      y1 = Math.max(Number(raw[1]), Number(raw[3]));
+    } else if (
+      Number.isFinite(Number(raw.x0)) &&
+      Number.isFinite(Number(raw.x1)) &&
+      Number.isFinite(Number(raw.y0)) &&
+      Number.isFinite(Number(raw.y1))
+    ) {
+      x0 = Math.min(Number(raw.x0), Number(raw.x1));
+      x1 = Math.max(Number(raw.x0), Number(raw.x1));
+      y0 = Math.min(Number(raw.y0), Number(raw.y1));
+      y1 = Math.max(Number(raw.y0), Number(raw.y1));
+    } else {
+      return null;
+    }
+    const bw = Math.round(x1 - x0);
+    const bh = Math.round(y1 - y0);
+    if (!(bw >= 8 && bh >= 8)) return null;
+    return { width_mm: bw, depth_mm: bh };
+  }
+
   function beamFlatExtractMmBucketsFromPlane(pl) {
     if (!pl) return { textMm: null, dimMm: null, outlineMm: null, textSnippet: '', dimSnippet: '', outlineSnippet: '' };
     const rv = pl.below_text_role_values || {};
     const txtRaw = rv['크기'];
-    let textMm =
-      beamFlatParseBxHNumsFromString(txtRaw != null ? String(txtRaw) : '') || null;
+    /* 텍스트·표기는 프론트 텍스트 분석(below_text_role_values['크기']) 만 사용 — 서버 표기/치수(member_mark_dims) 폴백 폐기 */
+    const textMm = beamFlatParseBxHNumsFromString(txtRaw != null ? String(txtRaw) : '') || null;
     let textSnippet = textMm ? textMm.width_mm + '×' + textMm.depth_mm : '';
-    const md = pl.member_mark_dims;
-    if (
-      !textMm &&
-      md &&
-      Number.isFinite(Number(md.width_mm)) &&
-      Number.isFinite(Number(md.depth_mm))
-    ) {
-      textMm = { width_mm: Math.round(Number(md.width_mm)), depth_mm: Math.round(Number(md.depth_mm)) };
-      textSnippet = '표기 ' + textMm.width_mm + '×' + textMm.depth_mm;
-    } else if (txtRaw && !textSnippet) {
+    if (txtRaw && !textSnippet) {
       textSnippet = beamFlatSanitizeRoleSizeDisplay(String(txtRaw)) || String(txtRaw).slice(0, 24);
     }
     const dimMm = beamFlatMmFromDimMatches(pl.dim_text_matches);
@@ -11511,12 +11785,9 @@
           })
           .join(' / ')
       : '';
-    let outlineMm = null;
-    const ww = pl.width_world;
-    const hh = pl.height_world;
-    if (Number.isFinite(Number(ww)) && Number.isFinite(Number(hh))) {
-      outlineMm = { width_mm: Math.round(Number(ww)), depth_mm: Math.round(Number(hh)) };
-    }
+    /* 단면 W×H: 프론트가 분석·그리는 단면 외곽 bbox(`norm_bbox`/`section_bbox`) 만 사용.
+       width_world/height_world(상·하 face 가로선분 길이)는 face 픽 오류로 노이즈가 잦아 폐기. */
+    const outlineMm = beamFlatPlaneDimsMmFromSectionBBox(pl);
     const outlineSnippet = outlineMm ? outlineMm.width_mm + '×' + outlineMm.depth_mm : '';
     return { textMm: textMm, dimMm: dimMm, outlineMm: outlineMm, textSnippet: textSnippet, dimSnippet: dimSnippet, outlineSnippet: outlineSnippet };
   }
@@ -11582,10 +11853,12 @@
   function beamFlatRenderDimMismatchTable(rows, opts) {
     const host = $('extractBeamDimMismatchHost');
     const wrap = $('extractBeamDimMismatchWrap');
+    const det = $('extractBeamDimMismatchDetails');
     if (!host || !wrap) return;
     if (opts && opts.hide) {
       wrap.style.display = 'none';
       host.innerHTML = '';
+      if (det) det.removeAttribute('open');
       return;
     }
     if (!rows || !rows.length) {
@@ -11594,6 +11867,7 @@
         '세 원천이 모두 있지 않거나, 서로 일치합니다.';
       host.innerHTML = '<p class="hint" style="margin:0;font-size:0.72rem">' + escapeHtml(eh) + '</p>';
       wrap.style.display = 'block';
+      if (det) det.removeAttribute('open');
       return;
     }
     let h =
@@ -11621,6 +11895,7 @@
     h += '</tbody></table>';
     host.innerHTML = h;
     wrap.style.display = 'block';
+    if (det) det.removeAttribute('open');
   }
 
   /** finalize 후 역할 맵·연쇄 배열과 불일치하는 표피 타깃 제거(중심→텍스트 선·디버그 목록) */
@@ -12324,7 +12599,10 @@
     let vtSideScoreRight = 0;
     const nTopSeed = (tb && tb.top && tb.top.length) || 0;
     const bbSeg = beamFlatBBoxGrowTopForFaceSegs(bb, circles, nTopSeed);
-    const segsIn = beamFlatSegmentsInSectionBBox(allSegments, bbSeg, 10);
+    let segsIn = beamFlatSegmentsInSectionBBox(allSegments, bbSeg, 10);
+    if (nb && segsIn.length) {
+      segsIn = beamFlatFilterSegmentsMaxSpanVsTightBb(segsIn, nb, 0);
+    }
     const hSegs = segsIn.filter(function (s) {
       return s.orient === 'H';
     });
@@ -12770,6 +13048,7 @@
       runB.beam_flat_merged_section_analysis = [];
       runB.beam_flat_center_links = [];
       runB.__beamHzSectionsOverride = [];
+      runB.__beamFlatOverlayCache = null;
       return [];
     }
     const eps = beamFlatPreviewCircleClusterEps(centers);
@@ -12850,61 +13129,37 @@
         pl.below_text_match_count = pl.below_text_debug_targets.length;
       }
     });
+    runB.__beamFlatOverlayCache = {
+      centers: centers,
+      eps: eps,
+      segments: segments,
+      stirrupVerticalLikeSegs: stirrupVerticalLikeSegs,
+      clusters: clusters,
+      metaRows: metaRows,
+      mergedGroups: mergedGroups,
+    };
+    runB.__beamFlatPipelineAt =
+      typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
     return runB.beam_flat_merged_section_analysis;
   }
 
   function drawBeamFlatCircleOnlyOverlays(ctx, runB) {
     if (!ctx || !previewData) return;
-    const centers = collectPreviewCircleCentersForBeamFlat(runB);
-    if (!centers.length) return;
-    const eps = beamFlatPreviewCircleClusterEps(centers);
-    const segments = collectPreviewOrthogonalSegmentsForBeamFlat(runB);
-    const stirrupVerticalLikeSegs = collectPreviewStirrupVerticalLikeSegmentsForBeamFlat(runB);
-    const clusters = splitCircleClustersByYBand(clusterWorldPointsByDistance(centers, eps), centers)
-      .map(function (cl) {
-        return {
-          label: 'CIRCLE',
-          circles: cl,
-          bbox: bboxFromWorldPoints(cl),
-        };
-      })
-      .filter(function (cl) { return cl && isFiniteBBox4(cl.bbox); })
-      .sort(function (a, b) { return beamWorldBBoxArea(b.bbox) - beamWorldBBoxArea(a.bbox); });
+    beamFlatEnsureMergedSectionAnalysis(runB);
+    const oc = runB.__beamFlatOverlayCache;
+    if (!oc || !oc.centers || !oc.centers.length) return;
+    const centers = oc.centers;
+    const eps = oc.eps;
+    const segments = oc.segments;
+    const stirrupVerticalLikeSegs = oc.stirrupVerticalLikeSegs;
+    const clusters = oc.clusters;
+    const metaRows = oc.metaRows;
+    const mergedGroups = oc.mergedGroups;
+    const planeAnalyses = runB.beam_flat_merged_section_analysis;
+    if (!planeAnalyses || !planeAnalyses.length) return;
+    const centerLinks = runB.beam_flat_center_links;
+    const markAnchorByPlaneDraw = beamFlatMemberMarkAnchorBestByPlane(centerLinks || []);
     const pulse = 0.65 + 0.35 * Math.abs(Math.sin(performance.now() / 320));
-
-    const metaRows = [];
-    for (let ci = 0; ci < clusters.length; ci++) {
-      beamFlatPushClusterMetaRow(metaRows, ci, clusters[ci], segments);
-    }
-
-    const mergedGroups = beamFlatMergeOverlappingUnitBboxes(metaRows);
-    const planeAnalyses = mergedGroups.map(function (g) {
-      return beamFlatAnalyzeMergedSectionPlane(g, metaRows, segments, stirrupVerticalLikeSegs);
-    });
-    const mzAnchors = beamFlatMemberZoneTextAnchors(runB);
-    const centerLinks = beamFlatNearestLowerSectionFromTextLinks(mzAnchors, planeAnalyses);
-    const markAnchorByPlaneDraw = beamFlatMemberMarkAnchorBestByPlane(centerLinks);
-    {
-      const seen = {};
-      for (let i = 0; i < centerLinks.length; i++) {
-        const lk = centerLinks[i];
-        const ti = lk && lk.to != null ? Number(lk.to) : NaN;
-        if (!Number.isFinite(ti) || ti < 0 || ti >= planeAnalyses.length) continue;
-        const sc = (Number(lk.dy) || 0) + (Number(lk.dx) || 0) * 0.2;
-        if (seen[ti] != null && sc >= seen[ti]) continue;
-        seen[ti] = sc;
-        planeAnalyses[ti].member_mark_text = String(lk.memberText || '');
-        planeAnalyses[ti].member_zone_text = String(lk.zoneText || '');
-        const md = lk.memberMarkDims;
-        if (md) {
-          planeAnalyses[ti].member_mark_dims = { width_mm: md.width_mm, depth_mm: md.depth_mm };
-        }
-      }
-    }
-    if (runB) {
-      runB.beam_flat_merged_section_analysis = planeAnalyses.filter(Boolean);
-      runB.beam_flat_center_links = centerLinks;
-    }
 
     // 텍스트(부재-부위) 앵커 -> 바로 아래(가장 가까운) 단면 중심 연결
     ctx.save();
@@ -13464,7 +13719,7 @@
           beam_section_geometry_zones: [],
         });
         const issueStrs = showViewerExtractErrors
-          ? columnRowExtractIssueStrings(fakeR, vB, ri, { forCadOverlay: true })
+          ? columnRowExtractIssueStrings(fakeR, vB, ri, { forCadOverlay: true, run: runB })
           : [];
         const hasIssue = issueStrs.length > 0;
         let searchFromPicked = false;
@@ -15097,7 +15352,7 @@
       const beamV = (lastRunByCategory.beam && lastRunByCategory.beam.validation) || {};
       if (catOv === 'beam' && beamR && beamValidationPolyNav(beamV)) {
         for (let ri = 0; ri < beamR.length; ri++) {
-          if (columnRowExtractIssueStrings(beamR[ri], beamV, ri, { forCadOverlay: true }).length) {
+          if (columnRowExtractIssueStrings(beamR[ri], beamV, ri, { forCadOverlay: true, run: lastRunByCategory.beam }).length) {
             nCadOverlayIssueRows++;
           }
         }
@@ -15131,7 +15386,7 @@
             const bV = lastRunByCategory.beam && lastRunByCategory.beam.validation;
             if (!any && catPulse === 'beam' && bR && bV && beamValidationPolyNav(bV)) {
               any = bR.some(function (row, idx) {
-                return columnRowExtractIssueStrings(row, bV, idx, { forCadOverlay: true }).length;
+                return columnRowExtractIssueStrings(row, bV, idx, { forCadOverlay: true, run: lastRunByCategory.beam }).length;
               });
             }
             if (!any) {
@@ -16510,6 +16765,24 @@
       const hit = ev.target && ev.target.closest && ev.target.closest('[data-extract-nav-row]');
       if (!hit) return;
       if (ev.target.closest('a,button,input,select,textarea,summary')) return;
+      /* 1순위: bbox 가 있으면 단면+부재명이 함께 보이도록 fitBounds(줌까지 조정) */
+      const bbRaw = hit.getAttribute('data-extract-nav-bbox');
+      if (bbRaw) {
+        const parts = String(bbRaw).split(',').map(function (s) {
+          return parseFloat(s);
+        });
+        if (parts.length === 4 && parts.every(Number.isFinite)) {
+          fitBounds(parts);
+          scheduleViewerRedraw();
+          const msg = $('msgExtract');
+          if (msg) {
+            msg.className = 'msg ok';
+            clearMsgTooltip(msg);
+            msg.textContent = '부재 위치로 뷰를 맞췄습니다.';
+          }
+          return;
+        }
+      }
       const wxRaw = hit.getAttribute('data-extract-nav-wx');
       const wyRaw = hit.getAttribute('data-extract-nav-wy');
       if (wxRaw != null && wyRaw != null && wxRaw !== '' && wyRaw !== '') {
@@ -16800,7 +17073,7 @@
       wsTidy['!cols'] = tcolW;
       XLSX.utils.book_append_sheet(wb, wsTidy, '보_부재');
     }
-    /* 보 가로 Y묶음: 부재별 표가 있을 때 엑셀 보_부재 포함(프론트 단면 기준일 때는 서버 flat 행 유무와 무관) */
+    /* 보 가로 Y묶음: DOM 부재별 표가 있을 때 엑셀 보_부재 포함(프론트 단면만; 서버 flat 행 미사용) */
     const beamHzClusters =
       catX === 'beam' &&
       Array.isArray(v.beam_row_clusters) &&
@@ -16809,7 +17082,7 @@
       catX === 'beam' &&
       !vb &&
       !vbb &&
-      (beamHzClusters || (beamMemberTableUseServerFlatRows && Array.isArray(v.beam_flat_member_table_rows) && v.beam_flat_member_table_rows.length))
+      beamHzClusters
     ) {
       const tidyAoa = aoaFromRenderedMemberTable() || buildBeamVerticalTidyAoa(rows, lastRun.validation, lastRun);
       const wsTidy = XLSX.utils.aoa_to_sheet(tidyAoa);
@@ -16989,6 +17262,33 @@
             if (msg) {
               msg.className = 'msg ok';
               msg.textContent = '보 단면 읽기 과정 디버그를 클립보드에 복사했습니다.';
+            }
+          },
+          function () {
+            alert('클립보드 복사에 실패했습니다.');
+          },
+        );
+      } else {
+        window.prompt('아래를 복사하세요:', t);
+      }
+    };
+  }
+
+  const btnBeamMemberTableForwardDebugCopy = $('btnBeamMemberTableForwardDebugCopy');
+  if (btnBeamMemberTableForwardDebugCopy) {
+    btnBeamMemberTableForwardDebugCopy.onclick = function () {
+      const t = window.__lastBeamMemberTableForwardDebugPlain || '';
+      if (!t) {
+        alert('복사할 전달 트레이스가 없습니다. 보 탭에서 일람 추출 후 부재별 표가 갱신됐는지 확인하세요.');
+        return;
+      }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(t).then(
+          function () {
+            const msg = $('msgExtract');
+            if (msg) {
+              msg.className = 'msg ok';
+              msg.textContent = '프론트→부재별표 TSV를 클립보드에 복사했습니다. 엑셀·메모장에 붙여 넣을 수 있습니다.';
             }
           },
           function () {
