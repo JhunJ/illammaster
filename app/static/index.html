@@ -5110,32 +5110,36 @@
     return pl;
   }
 
-  function beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD) {
-    if (!flatPl) return { w: fallbackW, d: fallbackD };
+  /**
+   * Width·Depth 출처는 오직 프론트 plane 자체. plane 이 없거나 plane 에서 값을 못 뽑으면 빈 값을 돌려준다.
+   * 옛 시그니처(fallbackW/fallbackD)는 호환을 위해 받지만 더 이상 표·엑셀에 반영하지 않는다.
+   */
+  function beamFlatResolveTableWidthDepthMm(flatPl /*, fallbackW, fallbackD */) {
+    if (!flatPl) return { w: '', d: '' };
     const bucks = beamFlatExtractMmBucketsFromPlane(flatPl);
     const r0 = beamFlatResolveMmFromBuckets(bucks, beamFlatGetMmPrimaryPreference());
     if (r0.mm && Number.isFinite(r0.mm.width_mm) && Number.isFinite(r0.mm.depth_mm))
       return { w: r0.mm.width_mm, d: r0.mm.depth_mm };
-    return { w: fallbackW, d: fallbackD };
+    return { w: '', d: '' };
   }
 
   /**
    * Width·Depth: 프론트뷰 단면(텍스트·표기 / 치수선 / 단면 W×H bbox) 만으로 결정.
-   * 서버에서 채워질 수 있는 `member_mark_dims`(부재명 표기 괄호치수 동기화 결과) 폴백은 사용하지 않는다.
+   * 서버에서 채워질 수 있는 `member_mark_dims` 또는 일람 행 width/depth 폴백은 사용하지 않는다.
    */
-  function beamFlatTableWidthDepthMmViewerFirst(flatPl, fallbackW, fallbackD) {
-    if (!flatPl) return { w: fallbackW, d: fallbackD };
+  function beamFlatTableWidthDepthMmViewerFirst(flatPl /*, fallbackW, fallbackD */) {
+    if (!flatPl) return { w: '', d: '' };
     const rv = flatPl.below_text_role_values || {};
     const parsed = beamFlatParseBxHNumsFromString(rv['크기'] != null ? String(rv['크기']) : '');
     if (parsed && Number.isFinite(parsed.width_mm) && Number.isFinite(parsed.depth_mm)) {
       return { w: parsed.width_mm, d: parsed.depth_mm };
     }
-    return beamFlatResolveTableWidthDepthMm(flatPl, fallbackW, fallbackD);
+    return beamFlatResolveTableWidthDepthMm(flatPl);
   }
 
   /** zone 의 `member_mark_dims`(서버 매칭 결과)도 더 이상 사용하지 않는다 — plane 기준만 사용. */
-  function beamFlatTableWidthDepthMmViewerFirstZone(flatPl, zoneEntry, fallbackW, fallbackD) {
-    return beamFlatTableWidthDepthMmViewerFirst(flatPl, fallbackW, fallbackD);
+  function beamFlatTableWidthDepthMmViewerFirstZone(flatPl /*, zoneEntry, fallbackW, fallbackD */) {
+    return beamFlatTableWidthDepthMmViewerFirst(flatPl);
   }
 
   /** 부위 라벨 선두 토큰(INT/END/EXT/CEN/ALL). `END( INT. )` 등은 END가 우선(괄호 안 INT 오인 방지). */
@@ -5890,16 +5894,17 @@
         stExt = hitExt ? zb('ext_stirrup_bar', flatTx.stir) : '';
         sideCell = hitInt || hitCen || hitExt ? zb('side_bar', flatTx.skin) : '';
       } else {
-        topInt = z(r.int_top_bar);
-        topCen = zb('cen_top_bar', r.cen_top_bar);
-        topExt = zb('ext_top_bar', r.ext_top_bar);
-        botInt = z(r.int_bot_bar);
-        botCen = zb('cen_bot_bar', r.cen_bot_bar);
-        botExt = zb('ext_bot_bar', r.ext_bot_bar);
-        stInt = z(r.int_stirrup_bar);
-        stCen = zb('cen_stirrup_bar', r.cen_stirrup_bar);
-        stExt = zb('ext_stirrup_bar', r.ext_stirrup_bar);
-        sideCell = flatTx.skin || z(r.side_bar);
+        /* 프론트 plane 이 없거나 plane 텍스트도 비었으면 빈 칸. 서버 r.*_bar 폴백은 더 이상 쓰지 않는다. */
+        topInt = '';
+        topCen = '';
+        topExt = '';
+        botInt = '';
+        botCen = '';
+        botExt = '';
+        stInt = '';
+        stCen = '';
+        stExt = '';
+        sideCell = '';
       }
       const nameCell = opts.nameCell;
       const rowNum = opts.rowNum;
@@ -5926,8 +5931,10 @@
       h += '<tr' + trAttrs + '>';
       h += '<td class="num">' + rowNum + '</td>';
       h += '<td>' + escapeHtml(nameCell) + '</td>';
-      h += '<td>' + escapeHtml(z(r.type)) + '</td>';
-      h += '<td>' + escapeHtml(z(r.material)) + '</td>';
+      /* Type / Material 은 도면 텍스트로 직접 뽑을 방법이 없어 서버 일람행(r.type / r.material) 만 출처였다.
+       * 사용자 요청에 따라 서버 폴백을 완전히 끊고 빈 칸으로 둔다 — 프론트 뷰만으로 표가 채워지도록. */
+      h += '<td></td>';
+      h += '<td></td>';
       h += '<td>' + escapeHtml(widthCell) + '</td>';
       h += '<td>' + escapeHtml(depthCell) + '</td>';
       h += '<td>' + escapeHtml(topInt) + '</td>';
@@ -6467,23 +6474,14 @@
           cStCen = hitCen ? zb('cen_stirrup_bar', flatTx.stir) : '';
           cStExt = hitExt ? zb('ext_stirrup_bar', flatTx.stir) : '';
           cSide = hitInt || hitCen || hitExt ? zb('side_bar', flatTx.skin) : '';
-        } else {
-          cTopInt = zb('int_top_bar', r.int_top_bar);
-          cTopCen = zb('cen_top_bar', r.cen_top_bar);
-          cTopExt = zb('ext_top_bar', r.ext_top_bar);
-          cBotInt = zb('int_bot_bar', r.int_bot_bar);
-          cBotCen = zb('cen_bot_bar', r.cen_bot_bar);
-          cBotExt = zb('ext_bot_bar', r.ext_bot_bar);
-          cStInt = zb('int_stirrup_bar', r.int_stirrup_bar);
-          cStCen = zb('cen_stirrup_bar', r.cen_stirrup_bar);
-          cStExt = zb('ext_stirrup_bar', r.ext_stirrup_bar);
-          cSide = zb('side_bar', r.side_bar);
         }
+        /* 프론트 plane 이 없으면 모두 빈 칸. 서버 r.*_bar 폴백은 더 이상 쓰지 않는다. */
         aoa.push([
           dispRow,
           nm,
-          z(r.type),
-          z(r.material),
+          /* Type / Material: 서버 폴백 끊음(부재별 표와 동일) — 프론트 뷰 단면만 출처 */
+          '',
+          '',
           z(resMm.w),
           z(resMm.d),
           cTopInt,
